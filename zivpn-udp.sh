@@ -1,5 +1,5 @@
 #!/bin/bash
-# ZIVPN UDP Server + Web UI (Myanmar) - KSO Fixed Edition + IP Everywhere
+# ZIVPN UDP Server + FIXED UI - ပြက္ခဒိန် + ကုန်ရက် + Copy FIX
 set -euo pipefail
 
 # ===== Colors =====
@@ -8,16 +8,14 @@ LINE="${B}───────────────────────�
 
 echo -e "
 $LINE
-${G}🌟 ZIVPN UDP-KSO Fixed Web Panel Enhanced${Z}
+${G}🌟 ZIVPN KSO UI - ပြက္ခဒိန် + Copy FIX${Z}
 $LINE"
 
 # Root check
 if [ "$(id -u)" -ne 0 ]; then echo -e "${R}Root user ဖြင့် run ပါ${Z}"; exit 1; fi
 
-# Basic Installs
 apt-get update -y && apt-get install -y curl ufw jq python3 python3-flask iproute2 conntrack openssl
 
-# Paths
 mkdir -p /etc/zivpn
 BIN="/usr/local/bin/zivpn"
 CFG="/etc/zivpn/config.json"
@@ -30,20 +28,15 @@ if [ ! -f "$BIN" ]; then
   chmod +x "$BIN"
 fi
 
-# Config & Certs
 [ -f "$CFG" ] || echo '{"listen":":5667","auth":{"mode":"passwords","config":["zi"]},"obfs":"zivpn"}' > "$CFG"
 [ -f "$USERS" ] || echo "[]" > "$USERS"
-if [ ! -f /etc/zivpn/zivpn.crt ]; then
-  openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 -subj "/CN=zivpn" -keyout "/etc/zivpn/zivpn.key" -out "/etc/zivpn/zivpn.crt" >/dev/null 2>&1
-fi
 
-# Web Admin Credentials Setup
+# Web Admin Setup
 echo -e "${Y}Setup Web Login${Z}"
-read -r -p "Username (Panel ထဲဝင်ဖို့): " WEB_USER
-read -r -s -p "Password (Panel ထဲဝင်ဖို့): " WEB_PASS; echo
+read -r -p "Username: " WEB_USER
+read -r -s -p "Password: " WEB_PASS; echo
 WEB_SECRET=$(openssl rand -hex 16)
 
-# Save to env file clearly
 cat > "$ENVF" << ENVE
 WEB_ADMIN_USER=$WEB_USER
 WEB_ADMIN_PASSWORD=$WEB_PASS
@@ -51,208 +44,279 @@ WEB_SECRET=$WEB_SECRET
 ENVE
 chmod 600 "$ENVF"
 
-# ===== Enhanced Web UI - IP EVERYWHERE =====
+# ===== PERFECT UI - ပြက္ခဒိန် + ကုန်ရက် + Full Copy =====
 cat > /etc/zivpn/web.py << 'PY'
-import os, json, subprocess, hmac
-from flask import Flask, render_template_string, request, redirect, session, jsonify
+from flask import Flask, request, redirect, render_template_string, session
+import os, json, subprocess
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("WEB_SECRET", "kso-key")
+app.secret_key = os.environ.get("WEB_SECRET", "kso123")
 USERS_FILE = "/etc/zivpn/users.json"
 CONFIG_FILE = "/etc/zivpn/config.json"
 
-def load_data():
-    try:
-        with open(USERS_FILE, "r") as f: return json.load(f)
+def load_users():
+    try: 
+        users = json.load(open(USERS_FILE))
+        now = datetime.now()
+        for u in users:
+            exp_date = datetime.strptime(u['expires'], '%Y-%m-%d')
+            days_left = max(0, (exp_date - now).days + 1)
+            u['days_left'] = days_left
+            u['status'] = 'good' if days_left > 10 else 'warn' if days_left > 3 else 'bad'
+        return users
     except: return []
 
-def save_data(data):
-    with open(USERS_FILE, "w") as f: json.dump(data, f, indent=2)
+def save_users(users):
+    json.dump(users, open(USERS_FILE, 'w'), indent=2)
     try:
-        with open(CONFIG_FILE, "r") as f: cfg = json.load(f)
-        cfg["auth"]["config"] = [u["password"] for u in data if "password" in u]
-        with open(CONFIG_FILE, "w") as f: json.dump(cfg, f, indent=2)
+        with open(CONFIG_FILE, 'r') as f:
+            cfg = json.load(f)
+        cfg["auth"]["config"] = [u["password"] for u in users if "password" in u]
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(cfg, f, indent=2)
         subprocess.run(["systemctl", "restart", "zivpn"], check=False)
     except: pass
 
-HTML = """
+HTML = '''
 <!DOCTYPE html>
 <html>
 <head>
+    <title>KSO VPN PANEL</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>KSO VIP PANEL</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        :root { --p: #2563eb; --bg: #f8fafc; --card: #ffffff; }
-        body { font-family: sans-serif; background: var(--bg); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
-        .container { width: 100%; max-width: 500px; }
-        .card { background: var(--card); padding: 20px; border-radius: 15px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        .input-group { margin-bottom: 15px; }
-        label { display: block; font-size: 12px; font-weight: bold; color: #64748b; margin-bottom: 5px; }
-        input { width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; box-sizing: border-box; }
-        .btn { cursor: pointer; border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; }
-        .btn-add { background: var(--p); color: white; width: 100%; }
-        .btn-exp { background: #f1f5f9; color: #475569; font-size: 11px; margin-right: 5px; }
-        .user-row { background: white; border-radius: 12px; margin-bottom: 10px; border-left: 5px solid #ccc; padding: 15px; }
-        .status-green { border-left-color: #10b981; }
-        .status-yellow { border-left-color: #f59e0b; }
-        .status-red { border-left-color: #ef4444; }
-        .user-details { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; font-size: 13px; }
-        .detail-label { font-weight: bold; color: #64748b; }
-        .detail-value { color: #1e293b; }
-        .config-box { background: #1e293b; color: #38bdf8; padding: 12px; border-radius: 8px; font-family: monospace; font-size: 12px; cursor: pointer; margin-bottom: 15px; text-align: center; transition: background 0.3s; }
-        .config-box:hover { background: #334155; }
-        .actions { display: flex; gap: 8px; justify-content: flex-end; }
-        .copy-icon { margin-left: 5px; }
-        h2 { text-align: center; color: var(--p); margin-bottom: 10px; }
-        .header-ip { background: #059669; color: white; padding: 15px; border-radius: 12px; text-align: center; margin-bottom: 20px; font-size: 18px; font-weight: bold; cursor: pointer; }
-        .header-ip:hover { background: #047857; }
-        .login-card::before { content: "Server IP: {{ip}}"; display: block; background: #1e293b; color: #38bdf8; padding: 10px; border-radius: 8px; text-align: center; font-family: monospace; margin-bottom: 15px; cursor: pointer; }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            min-height:100vh; font-family: -apple-system, sans-serif; 
+            padding:20px; display:flex; align-items:center; justify-content:center;
+        }
+        .panel { 
+            background:white; border-radius:20px; box-shadow:0 20px 40px rgba(0,0,0,0.1); 
+            max-width:500px; width:100%; padding:30px; 
+        }
+        h1 { text-align:center; color:#333; margin-bottom:10px; font-size:24px; }
+        .ip-box { 
+            background:#1a1a2e; color:#00f5ff; padding:15px; border-radius:12px; 
+            text-align:center; font-family:monospace; font-size:16px; margin-bottom:25px; 
+            cursor:pointer; transition:all 0.3s;
+        }
+        .ip-box:hover { background:#16213e; transform:scale(1.02); }
+        .form-group { margin-bottom:20px; }
+        label { display:block; color:#555; font-weight:500; margin-bottom:8px; }
+        input { 
+            width:100%; padding:12px; border:2px solid #e1e5e9; border-radius:10px; 
+            font-size:16px; transition:border-color 0.3s;
+        }
+        input:focus { outline:none; border-color:#667eea; }
+        /* ပြက္ခဒိန်အတွက် Style အသစ် */
+        input[type="date"] {
+            cursor: pointer;
+            text-transform: uppercase;
+        }
+        .btn { 
+            width:100%; padding:14px; border:none; border-radius:10px; font-size:16px; 
+            font-weight:600; cursor:pointer; transition:all 0.3s;
+        }
+        .btn-primary { background:#667eea; color:white; }
+        .btn-primary:hover { background:#5a67d8; transform:translateY(-2px); }
+        .user-item { 
+            background:#f8f9ff; border:2px solid #e1e5e9; border-radius:12px; 
+            padding:20px; margin-bottom:15px;
+        }
+        .user-line { 
+            display:flex; justify-content:space-between; align-items:center; 
+            margin-bottom:8px; font-family:monospace; font-size:14px;
+        }
+        .copy-btn { 
+            background:#10b981; color:white; border:none; padding:8px 12px; 
+            border-radius:6px; cursor:pointer; font-size:12px; transition:all 0.3s;
+        }
+        .copy-btn:hover { background:#059669; }
+        .days-row { display:flex; gap:10px; margin-top:10px; }
+        .btn-small { padding:8px 12px; font-size:14px; width:100%; }
+        .status { 
+            padding:4px 8px; border-radius:20px; font-size:12px; font-weight:600; 
+            margin-left:10px;
+        }
+        .status.good { background:#d4edda; color:#155724; }
+        .status.warn { background:#fff3cd; color:#856404; }
+        .status.bad { background:#f8d7da; color:#721c24; }
+        .del-btn { background:#ef4444; color:white; border:none; padding:6px 10px; 
+            border-radius:6px; cursor:pointer; }
+        .del-btn:hover { background:#dc2626; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h2>KSO VIP PANEL</h2>
-        
-        {% if not authed %}
-        <div class="card login-card">
-            <h3 style="text-align:center;">Login</h3>
-            <form method="POST" action="/login">
-                <div class="input-group"><label>Username</label><input name="u" required autofocus></div>
-                <div class="input-group"><label>Password</label><input name="p" type="password" required></div>
-                <button class="btn btn-add">အကောင့်ဝင်ရန်</button>
-            </form>
+    <div class="panel">
+        <h1>🔐 KSO VPN PANEL</h1>
+        <div class="ip-box" onclick="copyIP('{{ip}}')">
+            📡 SERVER IP: {{ip}}
         </div>
-        {% else %}
-        <div class="header-ip" onclick="copyText(this, '{{ip}}')">
-            Server IP: {{ip}} <i class="fas fa-copy copy-icon" style="font-size:14px;"></i>
-        </div>
-        
-        <div class="card">
-            <form method="POST" action="/add" id="addForm">
-                <div class="input-group"><label>Username</label><input name="user" id="uname" required></div>
-                <div class="input-group"><label>Password</label><input name="password" id="upass" required></div>
-                <div class="input-group"><label>ရက်ပေါင်း</label><input name="days" id="udays" value="30" type="number" min="1">
-                <div style="margin-top:8px;">
-                    <button type="button" class="btn btn-exp" onclick="setDays(30)">30 ရက် (1 လ)</button>
-                    <button type="button" class="btn btn-exp" onclick="setDays(60)">60 ရက် (2 လ)</button>
-                </div></div>
-                <button class="btn btn-add">သိမ်းဆည်းမည်</button>
-            </form>
-        </div>
-        {% endif %}
-        
-        {% for u in users %}
-        <div class="user-row {% if u.days_left > 10 %}status-green{% elif u.days_left > 3 %}status-yellow{% else %}status-red{% endif %}">
-            <div class="user-details">
-                <div><span class="detail-label">Server IP:</span> <span class="detail-value">{{ip}}</span></div>
-                <div><span class="detail-label">နာမည်:</span> <span class="detail-value">{{u.user}}</span></div>
-                <div><span class="detail-label">စကားဝှက်:</span> <span class="detail-value">{{u.password}}</span></div>
-                <div><span class="detail-label">ကုန်ရက်:</span> <span class="detail-value">{{u.expires}}</span></div>
-                <div style="grid-column: span 2;"><span class="detail-label">ကျန်ရက်:</span> <span class="detail-value">{{u.days_left}} ရက်</span></div>
+
+        {% if not session.auth %}
+        <form method="POST" action="/login">
+            <div class="form-group">
+                <label>👤 Admin Username</label>
+                <input name="user" required>
             </div>
-            <div style="display: flex; gap: 10px; align-items: center;">
-                <div class="config-box" style="font-size:11px;padding:8px;width:auto;" onclick="copyConfig('{{ip}}', '{{u.user}}', '{{u.password}}')">
-                    Full Config <i class="fas fa-copy copy-icon"></i>
+            <div class="form-group">
+                <label>🔑 Admin Password</label>
+                <input name="pass" type="password" required>
+            </div>
+            <button class="btn btn-primary">🚀 အကောင့်ဝင်ရန်</button>
+        </form>
+        {% else %}
+        
+        <form method="POST" action="/add">
+            <div class="form-group">
+                <label>👤 VPN Username</label>
+                <input name="user" id="newuser" placeholder="နာမည်ရိုက်ပါ" required>
+            </div>
+            <div class="form-group">
+                <label>🔑 VPN Password</label>
+                <input name="pass" id="newpass" placeholder="လျှို့ဝှက်နံပါတ်" required>
+            </div>
+            
+            <div class="form-group">
+                <label>📅 သက်တမ်းကုန်မည့်ရက်စွဲ (Expired Date)</label>
+                <input type="date" name="expire_date" id="expire_date" required>
+                
+                <div class="days-row">
+                    <button type="button" class="btn btn-small btn-primary" onclick="addMonths(1)">+ 1 လ တိုးမည်</button>
+                    <button type="button" class="btn btn-small btn-primary" onclick="addMonths(2)">+ 2 လ တိုးမည်</button>
                 </div>
-                <div class="actions">
-                    <button class="btn" style="background:#dcfce7; color:#166534; padding:8px 12px;" onclick="editUser('{{u.user}}','{{u.password}}')"><i class="fa-solid fa-edit"></i></button>
-                    <form method="POST" action="/delete" style="display:inline;"><input type="hidden" name="user" value="{{u.user}}"><button class="btn" style="background:#fee2e2; color:#991b1b; padding:8px 12px;" type="submit"><i class="fa-solid fa-trash"></i></button></form>
-                </div>
+            </div>
+            
+            <button class="btn btn-primary">➕ အကောင့်သစ် သိမ်းမည်</button>
+        </form>
+
+        <hr style="margin: 25px 0; border: 0; border-top: 1px solid #eee;">
+
+        {% for u in users %}
+        <div class="user-item">
+            <div class="user-line">
+                <span>👤 <b>{{u.user}}</b></span>
+                <span class="status {{u.status}}">{{u.days_left}} ရက် ကျန်</span>
+            </div>
+            <div class="user-line">
+                <span>🔑 {{u.password}}</span>
+                <button class="copy-btn" onclick="copyPass('{{u.password}}')">Copy Pass</button>
+            </div>
+            <div class="user-line">
+                <span>📅 {{u.expires}}</span>
+                <button class="copy-btn" onclick="copyFull('{{ip}}','{{u.user}}','{{u.password}}','{{u.expires}}')">Full Copy</button>
+            </div>
+            <div style="text-align: right; margin-top: 10px;">
+                <form method="POST" action="/delete" style="display:inline" onsubmit="return confirm('ဖျက်မှာ သေချာပါသလား?')">
+                    <input type="hidden" name="user" value="{{u.user}}">
+                    <button type="submit" class="del-btn">🗑️ Delete User</button>
+                </form>
             </div>
         </div>
         {% endfor %}
-        
-        <a href="/logout" style="display:block; text-align:center; color:#ef4444; text-decoration:none; margin-top:20px;">Logout</a>
+
+        <br><a href="/logout" style="color:#ef4444; text-align:center; display:block; text-decoration: none; font-weight: bold;">🚪 Logout Panel</a>
+        {% endif %}
     </div>
+
     <script>
-        function setDays(d) { document.getElementById('udays').value = d; }
-        function editUser(u, p) { document.getElementById('uname').value = u; document.getElementById('upass').value = p; window.scrollTo(0,0); }
-        function copyText(el, text) {
-            navigator.clipboard.writeText(text).then(() => {
-                el.style.background = "#047857";
-                setTimeout(() => el.style.background = "#059669", 1000);
-            });
+    // စာမျက်နှာစဖွင့်တာနဲ့ ဒီနေ့ရက်စွဲကို ပြက္ခဒိန်မှာ Default ပြပေးရန်
+    window.onload = function() {
+        if(document.getElementById('expire_date')) {
+            let today = new Date();
+            today.setMonth(today.getMonth() + 1); // Default ကို ၁ လ ပေါင်းပေးထားမည်
+            document.getElementById('expire_date').value = today.toISOString().split('T')[0];
         }
-        function copyConfig(ip, user, pass) {
-            const config = `Server IP: ${ip}
-Username: ${user}
-Password: ${pass}`;
-            navigator.clipboard.writeText(config).then(() => {
-                alert('✅ Full Config Copied!
-IP + User + Pass အကုန်လုံး Copy လုပ်ပြီး');
-            });
-        }
+    };
+
+    function addMonths(m) {
+        let dateField = document.getElementById('expire_date');
+        let date = new Date(); // ယနေ့မှစတွက်ရန်
+        date.setMonth(date.getMonth() + m);
+        dateField.value = date.toISOString().split('T')[0];
+    }
+
+    function copyIP(ip) {
+        navigator.clipboard.writeText(ip).then(() => alert('✅ IP Copied!'));
+    }
+    function copyPass(pass) {
+        navigator.clipboard.writeText(pass).then(() => alert('✅ Password Copied!'));
+    }
+    function copyFull(ip, user, pass, expires) {
+        const fullConfig = `IP: ${ip}\nUser: ${user}\nPass: ${pass}\nExpires: ${expires}`;
+        navigator.clipboard.writeText(fullConfig).then(() => {
+            alert('✅ FULL CONFIG COPIED!\n\nIP + User + Pass + ကုန်ရက်');
+        });
+    }
     </script>
 </body>
 </html>
-"""
+'''
 
-@app.route("/")
+@app.route('/')
 def index():
-    ip = request.host.split(":")[0]
-    if not session.get("auth"):
-        return render_template_string(HTML, authed=False, ip=ip, users=[])
-    users = load_data()
-    now = datetime.now()
-    for u in users:
-        try:
-            exp = datetime.strptime(u["expires"], "%Y-%m-%d")
-            u["days_left"] = max(0, (exp - now).days + 1)
-        except: u["days_left"] = 0
-    return render_template_string(HTML, authed=True, users=users, ip=ip)
+    ip = request.host.split(':')[0]
+    if not session.get('auth'):
+        return render_template_string(HTML, session={'auth':False}, ip=ip, users=[])
+    
+    users = load_users()
+    return render_template_string(HTML, session={'auth':True}, ip=ip, users=users)
 
-@app.route("/login", methods=["POST"])
+@app.route('/login', methods=['POST'])
 def login():
-    u = request.form.get("u")
-    p = request.form.get("p")
-    if u == os.environ.get("WEB_ADMIN_USER") and p == os.environ.get("WEB_ADMIN_PASSWORD"):
-        session["auth"] = True
-    return redirect("/")
+    if (request.form['user'] == os.environ.get('WEB_ADMIN_USER') and 
+        request.form['pass'] == os.environ.get('WEB_ADMIN_PASSWORD')):
+        session['auth'] = True
+    return redirect('/')
 
-@app.route("/logout")
+@app.route('/logout')
 def logout():
     session.clear()
-    return redirect("/")
+    return redirect('/')
 
-@app.route("/add", methods=["POST"])
+@app.route('/add', methods=['POST'])
 def add():
-    user = request.form.get("user")
-    pw = request.form.get("password")
-    days = int(request.form.get("days", 30))
-    exp_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
-    data = load_data()
-    found = False
-    for u in data:
-        if u["user"] == user:
-            u["password"] = pw
-            u["expires"] = exp_date
-            found = True
+    users = load_users()
+    user = request.form['user']
+    password = request.form['pass']
+    days = int(request.form['days'])
+    expires = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d')
+    
+    for u in users:
+        if u['user'] == user:
+            u['password'] = password
+            u['expires'] = expires
             break
-    if not found:
-        data.append({"user": user, "password": pw, "expires": exp_date})
-    save_data(data)
-    return redirect("/")
+    else:
+        users.append({
+            'user': user,
+            'password': password,
+            'expires': expires
+        })
+    
+    save_users(users)
+    return redirect('/')
 
-@app.route("/delete", methods=["POST"])
+@app.route('/delete', methods=['POST'])
 def delete():
-    user = request.form.get("user")
-    save_data([u for u in load_data() if u["user"] != user])
-    return redirect("/")
+    user = request.form['user']
+    users = [u for u in load_users() if u['user'] != user]
+    save_users(users)
+    return redirect('/')
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8880, debug=False)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8880, debug=False)
 PY
 
-# ===== Services Setup ===== (unchanged)
+# Services
 cat > /etc/systemd/system/zivpn.service << EOF
 [Unit]
 Description=ZIVPN UDP Server
 After=network.target
 [Service]
-ExecStart=$BIN server -c $CFG
+ExecStart=/usr/local/bin/zivpn server -c /etc/zivpn/config.json
 Restart=always
 [Install]
 WantedBy=multi-user.target
@@ -263,27 +327,23 @@ cat > /etc/systemd/system/zivpn-web.service << EOF
 Description=ZIVPN Web UI
 After=network.target
 [Service]
-EnvironmentFile=$ENVF
+EnvironmentFile=/etc/zivpn/web.env
 ExecStart=/usr/bin/python3 /etc/zivpn/web.py
 Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# Networking (unchanged)
+# Networking
 sysctl -w net.ipv4.ip_forward=1
-iptables -t nat -D PREROUTING -p udp --dport 6000:19999 -j DNAT --to-destination :5667 2>/dev/null || true
-iptables -t nat -A PREROUTING -p udp --dport 6000:19999 -j DNAT --to-destination :5667
-iptables -t nat -D POSTROUTING -j MASQUERADE 2>/dev/null || true
-iptables -t nat -A POSTROUTING -j MASQUERADE
-ufw allow 5667/udp && ufw allow 8880/tcp && ufw allow 6000:19999/udp
+iptables -t nat -A PREROUTING -p udp --dport 6000:19999 -j DNAT --to-destination :5667 2>/dev/null || true
+iptables -t nat -A POSTROUTING -j MASQUERADE 2>/dev/null || true
+ufw allow 5667/udp 8880/tcp 6000:19999/udp
 
 systemctl daemon-reload
 systemctl enable --now zivpn zivpn-web
-systemctl restart zivpn-web
 
 IP=$(hostname -I | awk '{print $1}')
-echo -e "$LINE"
-echo -e "${G}✅ အိုကေပြီ ကိုကို... IP အနှစ်သာရ ပြပေးထားပါပြီ${Z}"
-echo -e "${C}Panel Link: ${Y}http://$IP:8880${Z}"
+echo -e "${G}✅ ပြက္ခဒိန် + ကုန်ရက် + Full Copy FIX!${Z}"
+echo -e "${C}Panel: ${Y}http://$IP:8880${Z}"
 echo -e "$LINE"
