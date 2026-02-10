@@ -1,5 +1,5 @@
 #!/bin/bash
-# ZIVPN FULL WEB PANEL - RENEW TO SLIP FORM VERSION
+# ZIVPN FULL WEB PANEL - RENEW & AUTO-SYNC VERSION
 
 set -euo pipefail
 
@@ -33,6 +33,15 @@ USERS_FILE = "/etc/zivpn/users.json"
 VPS_IP = "$MY_IP"
 LOGO_URL = "https://raw.githubusercontent.com/KYAWSOEOO8/kso-script/main/icon.png"
 
+# VPN Service ကို User အသစ်သိအောင် လုပ်ပေးသည့် Function
+def sync_vpn():
+    try:
+        # ZIVPN Service ကို Restart ချပေးခြင်းဖြင့် User list အသစ်ကို ဖတ်စေသည်
+        subprocess.run(["systemctl", "restart", "zivpn-udp"], check=False)
+        subprocess.run(["systemctl", "restart", "zivpn"], check=False)
+    except:
+        pass
+
 HTML = """<!doctype html>
 <html lang="my"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
@@ -48,8 +57,7 @@ HTML = """<!doctype html>
     .slip-line { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px dashed var(--bd); font-size: 14px; }
     .s-lab { color: #64748b; font-weight: 600; }
     .s-val { color: #1e293b; font-weight: 800; }
-    input { width:100%; padding:12px; border:1px solid var(--bd); border-radius:10px; margin-bottom:10px; box-sizing:border-box; font-size: 14px; outline:none; transition: 0.3s; }
-    input:focus { border-color: var(--primary); box-shadow: 0 0 5px rgba(37,99,235,0.2); }
+    input { width:100%; padding:12px; border:1px solid var(--bd); border-radius:10px; margin-bottom:10px; box-sizing:border-box; font-size: 14px; outline:none; }
     .btn-main { width:100%; padding:14px; background:var(--primary); color:white; border:none; border-radius:12px; font-weight:800; cursor:pointer; }
     .user-card { border-left: 5px solid var(--ok); padding: 12px; background: #fdfdfd; border-radius: 12px; margin-bottom: 12px; border: 1px solid var(--bd); }
     .btn-group { display: flex; gap: 8px; margin-top: 10px; }
@@ -115,7 +123,6 @@ HTML = """<!doctype html>
     </div>
 
     <script>
-    // User အချက်အလက်များကို Form ဆီသို့ ပြန်တင်ပေးခြင်း
     function loadToForm(user, pass, date) {
         document.getElementById('inUser').value = user;
         document.getElementById('inPass').value = pass;
@@ -124,26 +131,22 @@ HTML = """<!doctype html>
         document.getElementById('input-section').scrollIntoView({behavior: 'smooth'});
         up();
     }
-
     window.onload = function() {
         let d = new Date(); d.setDate(d.getDate() + 30);
         document.getElementById('inDate').value = d.toISOString().split('T')[0];
         up();
     };
-
     function up() {
         document.getElementById('vUser').innerText = document.getElementById('inUser').value || "-";
         document.getElementById('vPass').innerText = document.getElementById('inPass').value || "-";
         document.getElementById('vDate').innerText = document.getElementById('inDate').value || "-";
     }
-
     function saveSlip() {
         if(!document.getElementById('inUser').value) return alert("နာမည်ထည့်ပါ");
         html2canvas(document.getElementById('slip-area')).then(canvas => {
             const link = document.createElement('a'); 
             link.download = 'KSO_'+document.getElementById('inUser').value+'.png';
-            link.href = canvas.toDataURL(); 
-            link.click();
+            link.href = canvas.toDataURL(); link.click();
             setTimeout(() => { document.getElementById('addForm').submit(); }, 600);
         });
     }
@@ -158,7 +161,6 @@ def get_users():
     try:
         with open(USERS_FILE, "r") as f: data = json.load(f)
     except: data = []
-    # Sort to remove duplicates when updating
     unique_data = {u['user']: u for u in data}
     final_list = list(unique_data.values())
     for u in final_list:
@@ -186,10 +188,10 @@ def logout(): session.clear(); return redirect("/")
 def add():
     u, p, exp = request.form.get("user"), request.form.get("password"), request.form.get("expires")
     data = get_users()
-    # If user exists, update it, otherwise append
     new_data = [user for user in data if user['user'] != u]
     new_data.append({"user": u, "password": p, "expires": exp})
     with open(USERS_FILE, "w") as f: json.dump(new_data, f)
+    sync_vpn() # VPN ကို User အသစ်သိအောင် Sync လုပ်ခိုင်းခြင်း
     return redirect("/")
 
 @app.route("/delete", methods=["POST"])
@@ -197,16 +199,34 @@ def delete():
     user = request.form.get("user")
     data = [u for u in get_users() if u['user'] != user]
     with open(USERS_FILE, "w") as f: json.dump(data, f)
+    sync_vpn() # User ဖျက်လိုက်ရင်လည်း Sync လုပ်ပေးရန်
     return redirect("/")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8880)
 PY
 
-# ===== Restart Service =====
+# ===== Web Service Setup =====
+cat >/etc/systemd/system/zivpn-web.service <<EOF
+[Unit]
+Description=ZIVPN Web Panel
+After=network.target
+[Service]
+Type=simple
+User=root
+EnvironmentFile=$ENVF
+ExecStart=/usr/bin/python3 /etc/zivpn/web.py
+Restart=always
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Port ဖွင့်ပေးခြင်း (Firewall)
+ufw allow 8880/tcp > /dev/null 2>&1 || true
+
 systemctl daemon-reload
 systemctl enable --now zivpn-web
 systemctl restart zivpn-web
 
-echo -e "\n\e[1;32m✅ Logic အသစ်ဖြင့် အောင်မြင်စွာ ပြင်ဆင်ပြီးပါပြီ!\e[0m"
+echo -e "\n\e[1;32m✅ Auto-Sync ပါဝင်သော Version ကို ပြင်ဆင်ပြီးပါပြီ!\e[0m"
 echo -e "\e[1;36mWeb URL:\e[0m \e[1;33mhttp://$MY_IP:8880\e[0m\n"
