@@ -1,5 +1,5 @@
 #!/bin/bash
-# ZIVPN UDP Server + FIXED UI - ပြက္ခဒိန် + ကုန်ရက် + Copy FIX
+# KSO VIP PANEL - ZIVPN UDP Server + ပြက္ခဒိန် + ကုန်ရက် + Full Copy FIX
 set -euo pipefail
 
 # ===== Colors =====
@@ -8,7 +8,7 @@ LINE="${B}───────────────────────�
 
 echo -e "
 $LINE
-${G}🌟 ZIVPN KSO UI - ပြက္ခဒိန် + Copy FIX${Z}
+${G}🌟 KSO VIP PANEL - ပြက္ခဒိန် + Copy FIX${Z}
 $LINE"
 
 # Root check
@@ -44,7 +44,7 @@ WEB_SECRET=$WEB_SECRET
 ENVE
 chmod 600 "$ENVF"
 
-# ===== PERFECT UI - ပြက္ခဒိန် + ကုန်ရက် + Full Copy =====
+# ===== KSO VIP PANEL - ပြက္ခဒိန် + ကုန်ရက် + Full Copy + IP Everywhere =====
 cat > /etc/zivpn/web.py << 'PY'
 from flask import Flask, request, redirect, render_template_string, session
 import os, json, subprocess
@@ -82,35 +82,34 @@ HTML = '''
 <!DOCTYPE html>
 <html>
 <head>
-    <title>KSO VPN PANEL</title>
+    <title>KSO VIP PANEL</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         * { margin:0; padding:0; box-sizing:border-box; }
         body { 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); 
             min-height:100vh; font-family: -apple-system, sans-serif; 
             padding:20px; display:flex; align-items:center; justify-content:center;
         }
         .panel { 
             background:white; border-radius:20px; box-shadow:0 20px 40px rgba(0,0,0,0.1); 
-            max-width:500px; width:100%; padding:30px; 
+            max-width:600px; width:100%; padding:30px; 
         }
-        h1 { text-align:center; color:#333; margin-bottom:10px; font-size:24px; }
+        h1 { text-align:center; color:#1e3c72; margin-bottom:15px; font-size:28px; }
         .ip-box { 
             background:#1a1a2e; color:#00f5ff; padding:15px; border-radius:12px; 
-            text-align:center; font-family:monospace; font-size:16px; margin-bottom:25px; 
+            text-align:center; font-family:monospace; font-size:18px; margin-bottom:25px; 
             cursor:pointer; transition:all 0.3s;
         }
         .ip-box:hover { background:#16213e; transform:scale(1.02); }
         .form-group { margin-bottom:20px; }
-        label { display:block; color:#555; font-weight:500; margin-bottom:8px; }
+        label { display:block; color:#333; font-weight:600; margin-bottom:8px; }
         input { 
             width:100%; padding:12px; border:2px solid #e1e5e9; border-radius:10px; 
             font-size:16px; transition:border-color 0.3s;
         }
-        input:focus { outline:none; border-color:#667eea; }
-        /* ပြက္ခဒိန်အတွက် Style အသစ် */
+        input:focus { outline:none; border-color:#2a5298; }
         input[type="date"] {
             cursor: pointer;
             text-transform: uppercase;
@@ -119,15 +118,15 @@ HTML = '''
             width:100%; padding:14px; border:none; border-radius:10px; font-size:16px; 
             font-weight:600; cursor:pointer; transition:all 0.3s;
         }
-        .btn-primary { background:#667eea; color:white; }
-        .btn-primary:hover { background:#5a67d8; transform:translateY(-2px); }
+        .btn-primary { background:#2a5298; color:white; }
+        .btn-primary:hover { background:#1e3c72; transform:translateY(-2px); }
         .user-item { 
             background:#f8f9ff; border:2px solid #e1e5e9; border-radius:12px; 
             padding:20px; margin-bottom:15px;
         }
         .user-line { 
             display:flex; justify-content:space-between; align-items:center; 
-            margin-bottom:8px; font-family:monospace; font-size:14px;
+            margin-bottom:10px; font-family:monospace; font-size:14px;
         }
         .copy-btn { 
             background:#10b981; color:white; border:none; padding:8px 12px; 
@@ -137,25 +136,26 @@ HTML = '''
         .days-row { display:flex; gap:10px; margin-top:10px; }
         .btn-small { padding:8px 12px; font-size:14px; width:100%; }
         .status { 
-            padding:4px 8px; border-radius:20px; font-size:12px; font-weight:600; 
+            padding:6px 12px; border-radius:20px; font-size:13px; font-weight:600; 
             margin-left:10px;
         }
         .status.good { background:#d4edda; color:#155724; }
         .status.warn { background:#fff3cd; color:#856404; }
         .status.bad { background:#f8d7da; color:#721c24; }
-        .del-btn { background:#ef4444; color:white; border:none; padding:6px 10px; 
-            border-radius:6px; cursor:pointer; }
+        .del-btn { background:#ef4444; color:white; border:none; padding:8px 12px; 
+            border-radius:6px; cursor:pointer; font-size:13px; }
         .del-btn:hover { background:#dc2626; }
+        .vip-title { color:#2a5298; font-weight:bold; font-size:20px; text-align:center; margin-bottom:20px; }
     </style>
 </head>
 <body>
     <div class="panel">
-        <h1>🔐 KSO VPN PANEL</h1>
+        {% if not session.auth %}
+        <!-- IP in Login Page -->
         <div class="ip-box" onclick="copyIP('{{ip}}')">
             📡 SERVER IP: {{ip}}
         </div>
-
-        {% if not session.auth %}
+        <h1 class="vip-title">🔐 KSO VIP PANEL</h1>
         <form method="POST" action="/login">
             <div class="form-group">
                 <label>👤 Admin Username</label>
@@ -169,6 +169,12 @@ HTML = '''
         </form>
         {% else %}
         
+        <!-- IP in Main Panel -->
+        <div class="ip-box" onclick="copyIP('{{ip}}')">
+            📡 SERVER IP: {{ip}}
+        </div>
+        <h1 class="vip-title">👑 KSO VIP PANEL</h1>
+
         <form method="POST" action="/add">
             <div class="form-group">
                 <label>👤 VPN Username</label>
@@ -184,8 +190,8 @@ HTML = '''
                 <input type="date" name="expire_date" id="expire_date" required>
                 
                 <div class="days-row">
-                    <button type="button" class="btn btn-small btn-primary" onclick="addMonths(1)">+ 1 လ တိုးမည်</button>
-                    <button type="button" class="btn btn-small btn-primary" onclick="addMonths(2)">+ 2 လ တိုးမည်</button>
+                    <button type="button" class="btn btn-small btn-primary" onclick="addMonths(1)">+ 1 လ ပြက္ခဒိန်</button>
+                    <button type="button" class="btn btn-small btn-primary" onclick="addMonths(2)">+ 2 လ ပြက္ခဒိန်</button>
                 </div>
             </div>
             
@@ -202,11 +208,11 @@ HTML = '''
             </div>
             <div class="user-line">
                 <span>🔑 {{u.password}}</span>
-                <button class="copy-btn" onclick="copyPass('{{u.password}}')">Copy Pass</button>
+                <button class="copy-btn" onclick="copyPass('{{u.password}}')">Copy Password</button>
             </div>
             <div class="user-line">
                 <span>📅 {{u.expires}}</span>
-                <button class="copy-btn" onclick="copyFull('{{ip}}','{{u.user}}','{{u.password}}','{{u.expires}}')">Full Copy</button>
+                <button class="copy-btn" onclick="copyFull('{{ip}}','{{u.user}}','{{u.password}}','{{u.expires}}')">📋 Full Copy All</button>
             </div>
             <div style="text-align: right; margin-top: 10px;">
                 <form method="POST" action="/delete" style="display:inline" onsubmit="return confirm('ဖျက်မှာ သေချာပါသလား?')">
@@ -241,13 +247,20 @@ HTML = '''
     function copyIP(ip) {
         navigator.clipboard.writeText(ip).then(() => alert('✅ IP Copied!'));
     }
+    
     function copyPass(pass) {
         navigator.clipboard.writeText(pass).then(() => alert('✅ Password Copied!'));
     }
+    
     function copyFull(ip, user, pass, expires) {
-        const fullConfig = `IP: ${ip}\nUser: ${user}\nPass: ${pass}\nExpires: ${expires}`;
+        const fullConfig = `IP: ${ip}
+User: ${user}
+Pass: ${pass}
+Expires: ${expires}`;
         navigator.clipboard.writeText(fullConfig).then(() => {
-            alert('✅ FULL CONFIG COPIED!\n\nIP + User + Pass + ကုန်ရက်');
+            alert('✅ FULL CONFIG COPIED!
+
+📡 IP + 👤 User + 🔑 Pass + 📅 ကုန်ရက်');
         });
     }
     </script>
@@ -281,19 +294,18 @@ def add():
     users = load_users()
     user = request.form['user']
     password = request.form['pass']
-    days = int(request.form['days'])
-    expires = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d')
+    expire_date = request.form['expire_date']
     
     for u in users:
         if u['user'] == user:
             u['password'] = password
-            u['expires'] = expires
+            u['expires'] = expire_date
             break
     else:
         users.append({
             'user': user,
             'password': password,
-            'expires': expires
+            'expires': expire_date
         })
     
     save_users(users)
@@ -324,7 +336,7 @@ EOF
 
 cat > /etc/systemd/system/zivpn-web.service << EOF
 [Unit]
-Description=ZIVPN Web UI
+Description=KSO VIP PANEL Web UI
 After=network.target
 [Service]
 EnvironmentFile=/etc/zivpn/web.env
@@ -344,6 +356,12 @@ systemctl daemon-reload
 systemctl enable --now zivpn zivpn-web
 
 IP=$(hostname -I | awk '{print $1}')
-echo -e "${G}✅ ပြက္ခဒိန် + ကုန်ရက် + Full Copy FIX!${Z}"
+echo -e "${G}✅ KSO VIP PANEL ပြက္ခဒိန် + ကုန်ရက် + Full Copy FIX!${Z}"
 echo -e "${C}Panel: ${Y}http://$IP:8880${Z}"
+echo -e "$LINE"
+echo -e "${G}🌟 Features:${Z}"
+echo -e "   ✅ IP အောက်မှာ ပြထားပြီး"
+echo -e "   ✅ အကုန်လုံး Copy လုပ်လို့ရပြီး"
+echo -e "   ✅ 1လ 2လ ပြက္ခဒိန် ထည့်ပေးထားပြီး"
+echo -e "   ✅ User details အသေးစိတ် ပြပေးထားပြီး"
 echo -e "$LINE"
