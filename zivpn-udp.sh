@@ -269,6 +269,49 @@ HTML = """
                 <h2 style="margin:0; color:var(--p);">KSO VIP PANEL</h2>
                 <span style="font-size:12px;">Server IP: <b>{{vps_ip}}</b> <i class="fa-regular fa-copy copy-btn" onclick="copyText('{{vps_ip}}')"></i></span>
             </div>
+HTML = """
+<!DOCTYPE html>
+<html lang="my">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root { --p:#2563eb; --bg:#f1f5f9; --card:#ffffff; --ok:#10b981; --warn:#f59e0b; --bad:#ef4444; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin:0; padding:15px; color:#334155; }
+        .container { width:100%; max-width:650px; margin:auto; }
+        .card { background:var(--card); padding:20px; border-radius:12px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom:15px; }
+        .btn { padding:10px; border:none; border-radius:8px; cursor:pointer; font-weight:bold; width:100%; margin-top:5px; }
+        .btn-p { background:var(--p); color:white; }
+        .status-pill { padding:3px 8px; border-radius:12px; font-size:10px; font-weight:bold; color:white; }
+        .bg-ok { background:var(--ok); } .bg-warn { background:var(--warn); } .bg-bad { background:var(--bad); }
+        table { width:100%; border-collapse:collapse; margin-top:10px; }
+        th { text-align:left; font-size:11px; color:#64748b; padding:8px; border-bottom:2px solid #f1f5f9; }
+        td { padding:10px 8px; border-bottom:1px solid #f1f5f9; font-size:13px; }
+        .copy-btn { color:var(--p); cursor:pointer; margin-left:5px; font-size:12px; }
+        .action-row { display:flex; gap:10px; }
+        input { width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box; }
+        label { font-size:11px; font-weight:bold; color:#64748b; display:block; margin-bottom:4px; margin-top:10px; }
+        .toast { position:fixed; bottom:20px; right:20px; background:#1e293b; color:white; padding:10px 20px; border-radius:8px; display:none; z-index:99; }
+    </style>
+</head>
+<body>
+    <div id="toast" class="toast">Copied!</div>
+    <div class="container">
+        {% if not authed %}
+            <div class="card" style="max-width:350px; margin:100px auto; text-align:center;">
+                <h2 style="color:var(--p)">ADMIN LOGIN</h2>
+                <form method="post" action="/login">
+                    <input name="u" placeholder="Username" required style="margin-bottom:10px;">
+                    <input name="p" type="password" placeholder="Password" required>
+                    <button class="btn btn-p">LOGIN</button>
+                </form>
+            </div>
+        {% else %}
+            <div style="text-align:center; margin-bottom:15px;">
+                <h2 style="margin:0; color:var(--p);">KSO VIP PANEL</h2>
+                <span style="font-size:12px;">Server IP: <b>{{vps_ip}}</b> <i class="fa-regular fa-copy copy-btn" onclick="copyText('{{vps_ip}}')"></i></span>
+            </div>
 
             <div class="card">
                 <form method="post" action="/add">
@@ -375,6 +418,47 @@ HTML = """
 </body>
 </html>
 """
+
+@app.route("/")
+def index():
+    if not session.get("authed"): return render_template_string(HTML, authed=False)
+    return render_template_string(HTML, authed=True, users=load_users(), vps_ip=VPS_IP)
+
+@app.route("/login", methods=["POST"])
+def login():
+    if request.form.get("u") == os.environ.get("WEB_ADMIN_USER") and \
+       request.form.get("p") == os.environ.get("WEB_ADMIN_PASSWORD"):
+        session["authed"] = True
+    return redirect(url_for("index"))
+
+@app.route("/logout")
+def logout():
+    session.clear(); return redirect(url_for("index"))
+
+@app.route("/add", methods=["POST"])
+def add_user():
+    if not session.get("authed"): return redirect(url_for("index"))
+    user = request.form.get("user").strip()
+    password = request.form.get("password").strip()
+    expires = request.form.get("exp_date") # Calendar ကနေလာတဲ့ YYYY-MM-DD format
+    
+    users = [u for u in load_users() if u["user"] != user]
+    users.append({"user": user, "password": password, "expires": expires})
+    save_users(users); sync_vpn()
+    return redirect(url_for("index"))
+
+@app.route("/delete", methods=["POST"])
+def delete_user():
+    if not session.get("authed"): return redirect(url_for("index"))
+    user = request.form.get("user")
+    users = [u for u in load_users() if u["user"] != user]
+    save_users(users); sync_vpn()
+    return redirect(url_for("index"))
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8880)
+PY
+
 
 @app.route("/")
 def index():
