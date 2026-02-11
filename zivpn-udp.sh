@@ -1,6 +1,6 @@
 #!/bin/bash
-# ZIVPN UDP Server + Web UI (Myanmar) - Advanced Copy Mode
-# Features: Individual Copy, Status Colors, Edit/Renew
+# ZIVPN UDP Server + Web UI (Myanmar) - Professional Edition
+# Fix: HTTP Clipboard Copy, Individual Copy Buttons, Status Colors
 
 set -euo pipefail
 
@@ -10,7 +10,11 @@ LINE="${B}───────────────────────�
 
 say(){ echo -e "$1"; }
 
-echo -e "\n$LINE\n${G}🌟 ZIVPN UDP-KSO (Full Copy Control) မှ ကြိုဆိုပါတယ်${Z}\n$LINE"
+# Error ဖြစ်နေရင် အရင်ရှင်းမယ် (Text file busy fix)
+systemctl stop zivpn zivpn-web 2>/dev/null || true
+pkill zivpn 2>/dev/null || true
+
+echo -e "\n$LINE\n${G}🌟 ZIVPN UDP-KSO (Expert Copy Mode) မှ ကြိုဆိုပါတယ်${Z}\n$LINE"
 
 # ===== Root check =====
 if [ "$(id -u)" -ne 0 ]; then
@@ -43,7 +47,7 @@ if [ ! -f /etc/zivpn/zivpn.crt ]; then
     -keyout "/etc/zivpn/zivpn.key" -out "/etc/zivpn/zivpn.crt" >/dev/null 2>&1
 fi
 
-# Admin Login (Default admin/admin123)
+# Admin Login Setup
 say "${Y}🔒 Web Admin အတွက် Username/Password သတ်မှတ်ပါ${Z}"
 read -r -p "Admin Username (Default: admin): " WEB_USER
 WEB_USER=${WEB_USER:-admin}
@@ -62,7 +66,7 @@ if [ ! -f "$CFG" ]; then
     echo '{"auth":{"mode":"passwords","config":["zi"]},"listen":":5667","cert":"/etc/zivpn/zivpn.crt","key":"/etc/zivpn/zivpn.key","obfs":"zivpn"}' > "$CFG"
 fi
 
-# ===== Web Python Script (Individual Copy Functions) =====
+# ===== Web Python Script (With Fixed HTTP Copy) =====
 cat > /etc/zivpn/web.py << 'PY'
 import os, json, subprocess, hmac, re
 from flask import Flask, render_template_string, request, redirect, url_for, session, jsonify
@@ -125,9 +129,7 @@ HTML = """
         th { text-align:left; font-size:11px; color:#64748b; padding:8px; border-bottom:2px solid #f1f5f9; }
         td { padding:10px 8px; border-bottom:1px solid #f1f5f9; font-size:13px; }
         .copy-btn { color:var(--p); cursor:pointer; margin-left:5px; font-size:12px; }
-        .copy-btn:hover { color:#1d4ed8; }
         .action-row { display:flex; gap:10px; }
-        .input-group { margin-bottom:10px; }
         input { width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box; }
         .toast { position:fixed; bottom:20px; right:20px; background:#1e293b; color:white; padding:10px 20px; border-radius:8px; display:none; z-index:99; }
     </style>
@@ -137,7 +139,7 @@ HTML = """
     <div class="container">
         {% if not authed %}
             <div class="card" style="max-width:350px; margin:100px auto; text-align:center;">
-                <h2>ADMIN LOGIN</h2>
+                <h2 style="color:var(--p)">ADMIN LOGIN</h2>
                 <form method="post" action="/login">
                     <input name="u" placeholder="Username" required style="margin-bottom:10px;">
                     <input name="p" type="password" placeholder="Password" required>
@@ -147,18 +149,18 @@ HTML = """
         {% else %}
             <div style="text-align:center; margin-bottom:15px;">
                 <h2 style="margin:0; color:var(--p);">KSO VIP PANEL</h2>
-                <span style="font-size:12px;">Server IP: <b>{{vps_ip}}</b> <i class="fa-regular fa-copy copy-btn" onclick="copy('{{vps_ip}}')"></i></span>
+                <span style="font-size:12px;">Server IP: <b>{{vps_ip}}</b> <i class="fa-regular fa-copy copy-btn" onclick="copyText('{{vps_ip}}')"></i></span>
             </div>
 
             <div class="card">
                 <form method="post" action="/add">
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                        <div class="input-group"><label style="font-size:11px; font-weight:bold;">အသုံးပြုသူအမည်</label><input name="user" id="inUser" required></div>
-                        <div class="input-group"><label style="font-size:11px; font-weight:bold;">စကားဝှက်</label><input name="password" id="inPass" required></div>
+                        <input name="user" id="inUser" placeholder="အသုံးပြုသူအမည်" required>
+                        <input name="password" id="inPass" placeholder="စကားဝှက်" required>
                     </div>
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                        <div class="input-group"><label style="font-size:11px; font-weight:bold;">ရက်ပေါင်း</label><input name="days" id="inDays" placeholder="30"></div>
-                        <div class="input-group"><label style="font-size:11px; font-weight:bold;">PORT</label><input name="port" placeholder="Auto"></div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
+                        <input name="days" id="inDays" placeholder="ရက်ပေါင်း (Default 30)">
+                        <input name="port" placeholder="Port (Auto)" readonly>
                     </div>
                     <button class="btn btn-p">SAVE ACCOUNT</button>
                 </form>
@@ -178,11 +180,11 @@ HTML = """
                         {% for u in users %}
                         <tr>
                             <td>
-                                <b>{{u.user}}</b> <i class="fa-regular fa-copy copy-btn" onclick="copy('{{u.user}}')"></i><br>
+                                <b>{{u.user}}</b> <i class="fa-regular fa-copy copy-btn" onclick="copyText('{{u.user}}')"></i><br>
                                 <small>{{vps_ip}}</small>
                             </td>
                             <td>
-                                <code>{{u.password}}</code> <i class="fa-regular fa-copy copy-btn" onclick="copy('{{u.password}}')"></i>
+                                <code>{{u.password}}</code> <i class="fa-regular fa-copy copy-btn" onclick="copyText('{{u.password}}')"></i>
                             </td>
                             <td>
                                 {% if u.days_left > 10 %}
@@ -192,7 +194,7 @@ HTML = """
                                 {% else %}
                                     <span class="status-pill bg-bad">{{u.days_left}} d</span>
                                 {% endif %}
-                                <br><small>{{u.expires}}</small> <i class="fa-regular fa-copy copy-btn" onclick="copy('{{u.expires}}')"></i>
+                                <br><small>{{u.expires}}</small> <i class="fa-regular fa-copy copy-btn" onclick="copyText('{{u.expires}}')"></i>
                             </td>
                             <td>
                                 <div class="action-row">
@@ -214,15 +216,20 @@ HTML = """
     </div>
 
     <script>
-        function copy(txt) {
-            navigator.clipboard.writeText(txt);
+        // HTTP မှာပါ အလုပ်လုပ်တဲ့ Copy Function
+        function copyText(txt) {
+            const el = document.createElement('textarea');
+            el.value = txt;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
             showToast("Copied: " + txt);
         }
 
         function copyFull(ip, u, p, exp) {
             const full = `🌐 KSO VIP ACCOUNT\\n───────────────\\nIP: ${ip}\\nUser: ${u}\\nPass: ${p}\\nExpire: ${exp}\\n───────────────`;
-            navigator.clipboard.writeText(full);
-            showToast("Full Account Info Copied!");
+            copyText(full);
         }
 
         function showToast(msg) {
@@ -281,7 +288,7 @@ if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8880)
 PY
 
-# ===== Systemd & Networking (Unchanged) =====
+# ===== Systemd Setup =====
 cat >/etc/systemd/system/zivpn.service <<EOF
 [Unit]
 Description=ZIVPN UDP Server
@@ -306,17 +313,24 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 
+# ===== Networking & Firewall =====
 sysctl -w net.ipv4.ip_forward=1
 IFACE=$(ip -4 route ls | awk '/default/ {print $5; exit}')
+iptables -t nat -D PREROUTING -i "$IFACE" -p udp --dport 6000:19999 -j DNAT --to-destination :5667 2>/dev/null || true
 iptables -t nat -A PREROUTING -i "$IFACE" -p udp --dport 6000:19999 -j DNAT --to-destination :5667
 iptables -t nat -A POSTROUTING -o "$IFACE" -j MASQUERADE
 ufw allow 5667/udp && ufw allow 6000:19999/udp && ufw allow 8880/tcp
 
+# ===== Launch =====
 systemctl daemon-reload
 systemctl enable --now zivpn zivpn-web
+systemctl restart zivpn zivpn-web
 
 IP=$(hostname -I | awk '{print $1}')
 echo -e "\n$LINE"
-say "${G}✅ အကုန်လုံး အိုကေပါပြီ${Z}"
+say "${G}✅ အကုန်လုံး ပေါင်းစည်းပြီးပါပြီ${Z}"
 say "${C}Web Panel :${Z} ${Y}http://$IP:8880${Z}"
+say "${C}Admin User:${Z} ${Y}$WEB_USER${Z}"
+say "${C}Admin Pass:${Z} ${Y}$WEB_PASS${Z}"
 echo -e "$LINE\n"
+
