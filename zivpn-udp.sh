@@ -131,6 +131,7 @@ HTML = """
         .copy-btn { color:var(--p); cursor:pointer; margin-left:5px; font-size:12px; }
         .action-row { display:flex; gap:10px; }
         input { width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box; }
+        label { font-size:11px; font-weight:bold; color:#64748b; display:block; margin-bottom:4px; margin-top:10px; }
         .toast { position:fixed; bottom:20px; right:20px; background:#1e293b; color:white; padding:10px 20px; border-radius:8px; display:none; z-index:99; }
     </style>
 </head>
@@ -155,14 +156,14 @@ HTML = """
             <div class="card">
                 <form method="post" action="/add">
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                        <input name="user" id="inUser" placeholder="အသုံးပြုသူအမည်" required>
-                        <input name="password" id="inPass" placeholder="စကားဝှက်" required>
+                        <div><label>အသုံးပြုသူအမည်</label><input name="user" id="inUser" required></div>
+                        <div><label>စကားဝှက်</label><input name="password" id="inPass" required></div>
                     </div>
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
-                        <input name="days" id="inDays" placeholder="ရက်ပေါင်း (Default 30)">
-                        <input name="port" placeholder="Port (Auto)" readonly>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                        <div><label>ကုန်ဆုံးမည့်ရက် (ပြက္ကဒိန်)</label><input type="date" name="exp_date" id="inDate" required></div>
+                        <div><label>Port</label><input name="port" value="Auto" readonly></div>
                     </div>
-                    <button class="btn btn-p">SAVE ACCOUNT</button>
+                    <button class="btn btn-p" style="margin-top:15px;">SAVE ACCOUNT</button>
                 </form>
             </div>
 
@@ -198,7 +199,7 @@ HTML = """
                             </td>
                             <td>
                                 <div class="action-row">
-                                    <i class="fa-solid fa-pen-to-square" style="color:var(--p); cursor:pointer;" onclick="edit('{{u.user}}', '{{u.password}}')"></i>
+                                    <i class="fa-solid fa-pen-to-square" style="color:var(--p); cursor:pointer;" onclick="edit('{{u.user}}', '{{u.password}}', '{{u.expires}}')"></i>
                                     <i class="fa-solid fa-share-nodes" style="color:#64748b; cursor:pointer;" onclick="copyFull('{{vps_ip}}', '{{u.user}}', '{{u.password}}', '{{u.expires}}')"></i>
                                     <form method="post" action="/delete" style="display:inline;" onsubmit="return confirm('ဖျက်မှာလား?')">
                                         <input type="hidden" name="user" value="{{u.user}}">
@@ -216,7 +217,15 @@ HTML = """
     </div>
 
     <script>
-        // HTTP မှာပါ အလုပ်လုပ်တဲ့ Copy Function
+        // စာမျက်နှာစဖွင့်ချိန်မှာ ယနေ့ကနေ ရက် ၃၀ နောက်ပိုင်းကို default ရွေးပေးထားမယ်
+        window.onload = function() {
+            if(document.getElementById('inDate')) {
+                let today = new Date();
+                today.setDate(today.getDate() + 30);
+                document.getElementById('inDate').value = today.toISOString().split('T')[0];
+            }
+        };
+
         function copyText(txt) {
             const el = document.createElement('textarea');
             el.value = txt;
@@ -224,7 +233,7 @@ HTML = """
             el.select();
             document.execCommand('copy');
             document.body.removeChild(el);
-            showToast("Copied: " + txt);
+            showToast("Copied!");
         }
 
         function copyFull(ip, u, p, exp) {
@@ -239,9 +248,10 @@ HTML = """
             setTimeout(() => { t.style.display = 'none'; }, 2000);
         }
 
-        function edit(u, p) {
+        function edit(u, p, d) {
             document.getElementById('inUser').value = u;
             document.getElementById('inPass').value = p;
+            document.getElementById('inDate').value = d;
             window.scrollTo({top: 0, behavior: 'smooth'});
         }
     </script>
@@ -268,9 +278,10 @@ def logout():
 @app.route("/add", methods=["POST"])
 def add_user():
     if not session.get("authed"): return redirect(url_for("index"))
-    user, password = request.form.get("user").strip(), request.form.get("password").strip()
-    days = int(request.form.get("days") or 30)
-    expires = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+    user = request.form.get("user").strip()
+    password = request.form.get("password").strip()
+    expires = request.form.get("exp_date") # Calendar ကနေလာတဲ့ YYYY-MM-DD format
+    
     users = [u for u in load_users() if u["user"] != user]
     users.append({"user": user, "password": password, "expires": expires})
     save_users(users); sync_vpn()
