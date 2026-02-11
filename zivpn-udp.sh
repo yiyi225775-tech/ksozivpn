@@ -232,6 +232,157 @@ HTML = """
             }
         };
 
+HTML = """
+<!DOCTYPE html>
+<html lang="my">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root { --p:#2563eb; --bg:#f1f5f9; --card:#ffffff; --ok:#10b981; --warn:#f59e0b; --bad:#ef4444; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin:0; padding:15px; color:#334155; }
+        .container { width:100%; max-width:650px; margin:auto; }
+        .card { background:var(--card); padding:20px; border-radius:12px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom:15px; }
+        .btn { padding:10px; border:none; border-radius:8px; cursor:pointer; font-weight:bold; width:100%; margin-top:5px; }
+        .btn-p { background:var(--p); color:white; }
+        .status-pill { padding:3px 8px; border-radius:12px; font-size:10px; font-weight:bold; color:white; }
+        .bg-ok { background:var(--ok); } .bg-warn { background:var(--warn); } .bg-bad { background:var(--bad); }
+        table { width:100%; border-collapse:collapse; margin-top:10px; }
+        th { text-align:left; font-size:11px; color:#64748b; padding:8px; border-bottom:2px solid #f1f5f9; }
+        td { padding:10px 8px; border-bottom:1px solid #f1f5f9; font-size:13px; }
+        .copy-btn { color:var(--p); cursor:pointer; margin-left:5px; font-size:12px; }
+        .action-row { display:flex; gap:10px; }
+        input { width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box; }
+        label { font-size:11px; font-weight:bold; color:#64748b; display:block; margin-bottom:4px; margin-top:10px; }
+        .toast { position:fixed; bottom:20px; right:20px; background:#1e293b; color:white; padding:10px 20px; border-radius:8px; display:none; z-index:99; }
+        
+        /* စလစ်ဒီဇိုင်းအသစ် ပေါင်းထည့်ထားသည် */
+        .slip-box { 
+            background: white; padding: 20px; border-radius: 10px; width: 280px; 
+            text-align: left; margin: 15px auto; border: 1px solid #eee; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05); font-family: sans-serif;
+        }
+        .slip-title { text-align: center; color: #2563eb; font-weight: bold; font-size: 24px; margin-bottom: 5px; }
+        .slip-line { border-bottom: 2px dashed #ddd; margin: 15px 0; }
+        .slip-row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 16px; }
+        .slip-footer { text-align: center; color: #10b981; font-weight: bold; font-size: 18px; margin-top: 15px; }
+    </style>
+</head>
+<body>
+    <div id="toast" class="toast">Copied!</div>
+    <div class="container">   
+        {% if not authed %}
+            <div class="card" style="max-width:350px; margin:100px auto; text-align:center;">
+                <div style="margin-bottom: 15px;">
+                    <img src="https://raw.githubusercontent.com/KYAWSOEOO8/kso-script/main/icon.png" 
+                         alt="Logo" 
+                         style="width: 100px; height: 100px; border-radius: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                </div>
+                
+                <h2 style="color:var(--p); margin-top: 0;">ADMIN LOGIN</h2>
+                <form method="post" action="/login">
+                    <input name="u" placeholder="Username" required style="margin-bottom:10px;">
+                    <input name="p" type="password" placeholder="Password" required>
+                    <button class="btn btn-p">LOGIN</button>
+                </form>
+            </div>
+        {% else %}
+            <div style="text-align:center; margin-bottom:15px;">
+                <h2 style="margin:0; color:var(--p);">KSO VIP PANEL</h2>
+                <span style="font-size:12px;">Server IP: <b>{{vps_ip}}</b> <i class="fa-regular fa-copy copy-btn" onclick="copyText('{{vps_ip}}')"></i></span>
+                
+                <div class="slip-box">
+                    <div class="slip-title">KSO VIP</div>
+                    <div class="slip-line"></div>
+                    <div class="slip-row"><span>နာမည်:</span> <span id="slipUser" style="font-weight:bold;">---</span></div>
+                    <div class="slip-row"><span>စကားဝှက်:</span> <span id="slipPass" style="font-weight:bold;">---</span></div>
+                    <div class="slip-row"><span>ကုန်ရက်:</span> <span id="slipDate" style="font-weight:bold;">---</span></div>
+                    <div class="slip-line"></div>
+                    <div class="slip-footer">ကျေးဇူးတင်ပါသည်</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <form method="post" action="/add" id="addForm">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                        <div><label>အသုံးပြုသူအမည်</label><input name="user" id="inUser" oninput="updateSlip()" required></div>
+                        <div><label>စကားဝှက်</label><input name="password" id="inPass" oninput="updateSlip()" required></div>
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                        <div><label>ကုန်ဆုံးမည့်ရက် (ပြက္ကဒိန်)</label><input type="date" name="exp_date" id="inDate" onchange="updateSlip()" required></div>
+                        <div><label>Port</label><input name="port" value="Auto" readonly></div>
+                    </div>
+                    <button class="btn btn-p" style="margin-top:15px;">SAVE ACCOUNT</button>
+                </form>
+            </div>
+
+            <div class="card" style="overflow-x:auto;">
+                <table id="userTable">
+                    <thead>
+                        <tr>
+                            <th>User/IP</th>
+                            <th>Password</th>
+                            <th>Expires</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for u in users %}
+                        <tr>
+                            <td>
+                                <b>{{u.user}}</b> <i class="fa-regular fa-copy copy-btn" onclick="copyText('{{u.user}}')"></i><br>
+                                <small>{{vps_ip}}</small>
+                            </td>
+                            <td>
+                                <code>{{u.password}}</code> <i class="fa-regular fa-copy copy-btn" onclick="copyText('{{u.password}}')"></i>
+                            </td>
+                            <td>
+                                {% if u.days_left > 10 %}
+                                    <span class="status-pill bg-ok">{{u.days_left}} d</span>
+                                {% elif u.days_left > 3 %}
+                                    <span class="status-pill bg-warn">{{u.days_left}} d</span>
+                                {% else %}
+                                    <span class="status-pill bg-bad">{{u.days_left}} d</span>
+                                {% endif %}
+                                <br><small>{{u.expires}}</small> <i class="fa-regular fa-copy copy-btn" onclick="copyText('{{u.expires}}')"></i>
+                            </td>
+                            <td>
+                                <div class="action-row">
+                                    <i class="fa-solid fa-pen-to-square" style="color:var(--p); cursor:pointer;" onclick="edit('{{u.user}}', '{{u.password}}', '{{u.expires}}')"></i>
+                                    <i class="fa-solid fa-share-nodes" style="color:#64748b; cursor:pointer;" onclick="copyFull('{{vps_ip}}', '{{u.user}}', '{{u.password}}', '{{u.expires}}')"></i>
+                                    <form method="post" action="/delete" style="display:inline;" onsubmit="return confirm('ဖျက်မှာလား?')">
+                                        <input type="hidden" name="user" value="{{u.user}}">
+                                        <button style="border:none; background:none; padding:0; cursor:pointer;"><i class="fa-solid fa-trash-can" style="color:var(--bad);"></i></button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div style="text-align:center;"><a href="/logout" style="color:var(--bad); font-size:12px; text-decoration:none;">Logout Panel</a></div>
+        {% endif %}
+    </div>
+
+    <script>
+        window.onload = function() {
+            if(document.getElementById('inDate')) {
+                let today = new Date();
+                today.setDate(today.getDate() + 30);
+                document.getElementById('inDate').value = today.toISOString().split('T')[0];
+                updateSlip(); // စဖွင့်ချိန် စလစ်ထဲ စာဖြည့်ပေးရန်
+            }
+        };
+
+        // စာရိုက်နေစဉ် စလစ်ထဲတွင် တိုက်ရိုက်ပြသရန် Function
+        function updateSlip() {
+            document.getElementById('slipUser').innerText = document.getElementById('inUser').value || '---';
+            document.getElementById('slipPass').innerText = document.getElementById('inPass').value || '---';
+            document.getElementById('slipDate').innerText = document.getElementById('inDate').value || '---';
+        }
+
         function copyText(txt) {
             const el = document.createElement('textarea');
             el.value = txt;
@@ -243,9 +394,18 @@ HTML = """
         }
 
         function copyFull(ip, u, p, exp) {
-            const full = `🌐 KSO VIP ACCOUNT\\n───────────────\\nIP: ${ip}\\nUser: ${u}\\nPass: ${p}\\nExpire: ${exp}\\n───────────────`;
+            const full = `       KSO VIP       \\n---------------------\\nနာမည်:            ${u}\\nစကားဝှက်:          ${p}\\nကုန်ရက်:           ${exp}\\n---------------------\\n    ကျေးဇူးတင်ပါသည်    `;
             copyText(full);
         }
+
+        // SAVE ACCOUNT နှိပ်လျှင် အော်တို Copy ကူးပေးရန်
+        document.getElementById('addForm')?.addEventListener('submit', function() {
+            const u = document.getElementById('inUser').value;
+            const p = document.getElementById('inPass').value;
+            const d = document.getElementById('inDate').value;
+            const slipText = `       KSO VIP       \\n---------------------\\nနာမည်:            ${u}\\nစကားဝှက်:          ${p}\\nကုန်ရက်:           ${d}\\n---------------------\\n    ကျေးဇူးတင်ပါသည်    `;
+            setTimeout(() => { copyText(slipText); }, 500);
+        });
 
         function showToast(msg) {
             const t = document.getElementById('toast');
@@ -258,13 +418,13 @@ HTML = """
             document.getElementById('inUser').value = u;
             document.getElementById('inPass').value = p;
             document.getElementById('inDate').value = d;
+            updateSlip(); // Edit နှိပ်ရင် စလစ်ထဲမှာပါ ပြောင်းရန်
             window.scrollTo({top: 0, behavior: 'smooth'});
         }
     </script>
 </body>
 </html>
 """
-
 @app.route("/")
 def index():
     if not session.get("authed"): return render_template_string(HTML, authed=False)
