@@ -23,12 +23,25 @@ BIN="/usr/local/bin/zivpn"
 curl -fsSL -o "$BIN" "https://github.com/zahidbd2/udp-zivpn/releases/latest/download/udp-zivpn-linux-amd64"
 chmod +x "$BIN"
 
-# Set Admin Credentials
+# Set Admin Credentials (User Input Customization)
+echo -e "${LINE}"
+echo -e "${Y}Admin Web Panel အတွက် အချက်အလက်များ သတ်မှတ်ပါ${Z}"
+read -p "Admin Username (Default: admin): " CUSTOM_USER
+read -p "Admin Password (Default: admin123): " CUSTOM_PASS
+echo -e "${LINE}"
+
+# User ဘာမှမရိုက်ခဲ့ရင် Default တန်ဖိုးပေးထားမည်
+CUSTOM_USER=${CUSTOM_USER:-admin}
+CUSTOM_PASS=${CUSTOM_PASS:-admin123}
 WEB_SECRET=$(openssl rand -hex 16)
-[ -f "/etc/zivpn/web.env" ] || {
-    echo "WEB_ADMIN_USER=admin" > /etc/zivpn/web.env
-    echo "WEB_ADMIN_PASSWORD=admin123" >> /etc/zivpn/web.env
-}
+
+# /etc/zivpn/web.env ဖိုင်ထဲသို့ ရေးထည့်ခြင်း
+echo "WEB_ADMIN_USER=${CUSTOM_USER}" > /etc/zivpn/web.env
+echo "WEB_ADMIN_PASSWORD=${CUSTOM_PASS}" >> /etc/zivpn/web.env
+echo "WEB_SECRET=${WEB_SECRET}" >> /etc/zivpn/web.env
+
+echo -e "${G}✅ Admin Login ကို [ $CUSTOM_USER / $CUSTOM_PASS ] အဖြစ် သတ်မှတ်ပြီးပါပြီ။${Z}"
+
 echo "WEB_SECRET=${WEB_SECRET}" >> /etc/zivpn/web.env
 
 # Generate SSL
