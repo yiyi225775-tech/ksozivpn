@@ -137,10 +137,16 @@ HTML = """
 </head>
 <body>
     <div id="toast" class="toast">Copied!</div>
-    <div class="container">
-        {% if not authed %}
+    <div class="container">   
+                {% if not authed %}
             <div class="card" style="max-width:350px; margin:100px auto; text-align:center;">
-                <h2 style="color:var(--p)">ADMIN LOGIN</h2>
+                <div style="margin-bottom: 15px;">
+                    <img src="https://raw.githubusercontent.com/KYAWSOEOO8/kso-script/main/icon.png" 
+                         alt="Logo" 
+                         style="width: 100px; height: 100px; border-radius: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                </div>
+                
+                <h2 style="color:var(--p); margin-top: 0;">ADMIN LOGIN</h2>
                 <form method="post" action="/login">
                     <input name="u" placeholder="Username" required style="margin-bottom:10px;">
                     <input name="p" type="password" placeholder="Password" required>
