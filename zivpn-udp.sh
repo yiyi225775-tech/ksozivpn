@@ -226,6 +226,132 @@ HTML = """
             document.body.removeChild(el);
             showToast("Copied: " + txt);
         }
+HTML = """
+<!DOCTYPE html>
+<html lang="my">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root { --p:#2563eb; --bg:#f1f5f9; --card:#ffffff; --ok:#10b981; --warn:#f59e0b; --bad:#ef4444; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin:0; padding:15px; color:#334155; }
+        .container { width:100%; max-width:650px; margin:auto; }
+        .card { background:var(--card); padding:20px; border-radius:12px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom:15px; }
+        .btn { padding:10px; border:none; border-radius:8px; cursor:pointer; font-weight:bold; width:100%; margin-top:5px; }
+        .btn-p { background:var(--p); color:white; }
+        .status-pill { padding:3px 8px; border-radius:12px; font-size:10px; font-weight:bold; color:white; }
+        .bg-ok { background:var(--ok); } .bg-warn { background:var(--warn); } .bg-bad { background:var(--bad); }
+        table { width:100%; border-collapse:collapse; margin-top:10px; }
+        th { text-align:left; font-size:11px; color:#64748b; padding:8px; border-bottom:2px solid #f1f5f9; }
+        td { padding:10px 8px; border-bottom:1px solid #f1f5f9; font-size:13px; }
+        .copy-btn { color:var(--p); cursor:pointer; margin-left:5px; font-size:12px; }
+        .action-row { display:flex; gap:10px; }
+        input { width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box; }
+        label { font-size:11px; font-weight:bold; color:#64748b; display:block; margin-bottom:4px; margin-top:10px; }
+        .toast { position:fixed; bottom:20px; right:20px; background:#1e293b; color:white; padding:10px 20px; border-radius:8px; display:none; z-index:99; }
+    </style>
+</head>
+<body>
+    <div id="toast" class="toast">Copied!</div>
+    <div class="container">
+        {% if not authed %}
+            <div class="card" style="max-width:350px; margin:100px auto; text-align:center;">
+                <h2 style="color:var(--p)">ADMIN LOGIN</h2>
+                <form method="post" action="/login">
+                    <input name="u" placeholder="Username" required style="margin-bottom:10px;">
+                    <input name="p" type="password" placeholder="Password" required>
+                    <button class="btn btn-p">LOGIN</button>
+                </form>
+            </div>
+        {% else %}
+            <div style="text-align:center; margin-bottom:15px;">
+                <h2 style="margin:0; color:var(--p);">KSO VIP PANEL</h2>
+                <span style="font-size:12px;">Server IP: <b>{{vps_ip}}</b> <i class="fa-regular fa-copy copy-btn" onclick="copyText('{{vps_ip}}')"></i></span>
+            </div>
+
+            <div class="card">
+                <form method="post" action="/add">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                        <div><label>အသုံးပြုသူအမည်</label><input name="user" id="inUser" required></div>
+                        <div><label>စကားဝှက်</label><input name="password" id="inPass" required></div>
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                        <div><label>ကုန်ဆုံးမည့်ရက် (ပြက္ကဒိန်)</label><input type="date" name="exp_date" id="inDate" required></div>
+                        <div><label>Port</label><input name="port" value="Auto" readonly></div>
+                    </div>
+                    <button class="btn btn-p" style="margin-top:15px;">SAVE ACCOUNT</button>
+                </form>
+            </div>
+
+            <div class="card" style="overflow-x:auto;">
+                <table id="userTable">
+                    <thead>
+                        <tr>
+                            <th>User/IP</th>
+                            <th>Password</th>
+                            <th>Expires</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for u in users %}
+                        <tr>
+                            <td>
+                                <b>{{u.user}}</b> <i class="fa-regular fa-copy copy-btn" onclick="copyText('{{u.user}}')"></i><br>
+                                <small>{{vps_ip}}</small>
+                            </td>
+                            <td>
+                                <code>{{u.password}}</code> <i class="fa-regular fa-copy copy-btn" onclick="copyText('{{u.password}}')"></i>
+                            </td>
+                            <td>
+                                {% if u.days_left > 10 %}
+                                    <span class="status-pill bg-ok">{{u.days_left}} d</span>
+                                {% elif u.days_left > 3 %}
+                                    <span class="status-pill bg-warn">{{u.days_left}} d</span>
+                                {% else %}
+                                    <span class="status-pill bg-bad">{{u.days_left}} d</span>
+                                {% endif %}
+                                <br><small>{{u.expires}}</small> <i class="fa-regular fa-copy copy-btn" onclick="copyText('{{u.expires}}')"></i>
+                            </td>
+                            <td>
+                                <div class="action-row">
+                                    <i class="fa-solid fa-pen-to-square" style="color:var(--p); cursor:pointer;" onclick="edit('{{u.user}}', '{{u.password}}', '{{u.expires}}')"></i>
+                                    <i class="fa-solid fa-share-nodes" style="color:#64748b; cursor:pointer;" onclick="copyFull('{{vps_ip}}', '{{u.user}}', '{{u.password}}', '{{u.expires}}')"></i>
+                                    <form method="post" action="/delete" style="display:inline;" onsubmit="return confirm('ဖျက်မှာလား?')">
+                                        <input type="hidden" name="user" value="{{u.user}}">
+                                        <button style="border:none; background:none; padding:0; cursor:pointer;"><i class="fa-solid fa-trash-can" style="color:var(--bad);"></i></button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div style="text-align:center;"><a href="/logout" style="color:var(--bad); font-size:12px; text-decoration:none;">Logout Panel</a></div>
+        {% endif %}
+    </div>
+
+    <script>
+        // စာမျက်နှာစဖွင့်ချိန်မှာ ယနေ့ကနေ ရက် ၃၀ နောက်ပိုင်းကို default ရွေးပေးထားမယ်
+        window.onload = function() {
+            if(document.getElementById('inDate')) {
+                let today = new Date();
+                today.setDate(today.getDate() + 30);
+                document.getElementById('inDate').value = today.toISOString().split('T')[0];
+            }
+        };
+
+        function copyText(txt) {
+            const el = document.createElement('textarea');
+            el.value = txt;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            showToast("Copied!");
+        }
 
         function copyFull(ip, u, p, exp) {
             const full = `🌐 KSO VIP ACCOUNT\\n───────────────\\nIP: ${ip}\\nUser: ${u}\\nPass: ${p}\\nExpire: ${exp}\\n───────────────`;
@@ -239,9 +365,10 @@ HTML = """
             setTimeout(() => { t.style.display = 'none'; }, 2000);
         }
 
-        function edit(u, p) {
+        function edit(u, p, d) {
             document.getElementById('inUser').value = u;
             document.getElementById('inPass').value = p;
+            document.getElementById('inDate').value = d;
             window.scrollTo({top: 0, behavior: 'smooth'});
         }
     </script>
@@ -268,9 +395,10 @@ def logout():
 @app.route("/add", methods=["POST"])
 def add_user():
     if not session.get("authed"): return redirect(url_for("index"))
-    user, password = request.form.get("user").strip(), request.form.get("password").strip()
-    days = int(request.form.get("days") or 30)
-    expires = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+    user = request.form.get("user").strip()
+    password = request.form.get("password").strip()
+    expires = request.form.get("exp_date") # Calendar ကနေလာတဲ့ YYYY-MM-DD format
+    
     users = [u for u in load_users() if u["user"] != user]
     users.append({"user": user, "password": password, "expires": expires})
     save_users(users); sync_vpn()
@@ -286,6 +414,8 @@ def delete_user():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8880)
+PY
+
 PY
 
 # ===== Systemd Setup =====
