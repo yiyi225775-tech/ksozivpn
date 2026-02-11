@@ -114,8 +114,6 @@ def sync_vpn():
             document.body.removeChild(el);
             showToast("Copied: " + txt);
         }
-        
-HTML = """
 HTML = """
 <!DOCTYPE html>
 <html lang="my">
