@@ -237,45 +237,59 @@ def delete():
     return redirect("/")
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8880)
+  app.run(host="0.0.0.0", port=8880)
 PY
 
-# ===== Systemd & Networking =====
-cat >/etc/systemd/system/zivpn.service <<EOF
-[Unit]
-Description=ZIVPN Server
-After=network.target
-[Service]
-ExecStart=$BIN server -c /etc/zivpn/config.json
-Restart=always
-[Install]
-WantedBy=multi-user.target
-EOF
-
-cat >/etc/systemd/system/zivpn-web.service <<EOF
+# ===== Web systemd =====
+cat >/etc/systemd/system/zivpn-web.service <<'EOF'
 [Unit]
 Description=ZIVPN Web Panel
 After=network.target
+
 [Service]
-EnvironmentFile=/etc/zivpn/web.env
+Type=simple
+User=root
+# Load optional web login credentials
+EnvironmentFile=-/etc/zivpn/web.env
 ExecStart=/usr/bin/python3 /etc/zivpn/web.py
 Restart=always
+RestartSec=3
+
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# Network Setup
-sysctl -w net.ipv4.ip_forward=1
-IFACE=$(ip -4 route ls | awk '/default/ {print $5; exit}')
-iptables -t nat -A PREROUTING -i "$IFACE" -p udp --dport 6000:19999 -j DNAT --to-destination :5667
-iptables -t nat -A POSTROUTING -o "$IFACE" -j MASQUERADE
-ufw allow 8880/tcp && ufw allow 5667/udp && ufw allow 6000:19999/udp
+# ===== Networking: forwarding + DNAT + MASQ + UFW =====
+echo -e "${Y}😁ရပါပြီနော်..ကိုကို😘😘😘...${Z}"
+sysctl -w net.ipv4.ip_forward=1 >/dev/null
+grep -q '^net.ipv4.ip_forward=1' /etc/sysctl.conf || echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
 
+IFACE=$(ip -4 route ls | awk '/default/ {print $5; exit}')
+[ -n "${IFACE:-}" ] || IFACE=eth0
+# DNAT 6000:19999/udp -> :5667
+iptables -t nat -C PREROUTING -i "$IFACE" -p udp --dport 6000:19999 -j DNAT --to-destination :5667 2>/dev/null || \
+iptables -t nat -A PREROUTING -i "$IFACE" -p udp --dport 6000:19999 -j DNAT --to-destination :5667
+# MASQ out
+iptables -t nat -C POSTROUTING -o "$IFACE" -j MASQUERADE 2>/dev/null || \
+iptables -t nat -A POSTROUTING -o "$IFACE" -j MASQUERADE
+
+ufw allow 5667/udp >/dev/null 2>&1 || true
+ufw allow 6000:19999/udp >/dev/null 2>&1 || true
+ufw allow 8880/tcp >/dev/null 2>&1 || true
+ufw reload >/dev/null 2>&1 || true
+
+# ===== CRLF sanitize =====
+sed -i 's/\r$//' /etc/zivpn/web.py /etc/systemd/system/zivpn.service /etc/systemd/system/zivpn-web.service || true
+
+# ===== Enable services =====
 systemctl daemon-reload
-systemctl enable --now zivpn zivpn-web
-systemctl restart zivpn zivpn-web
+systemctl enable --now zivpn.service
+systemctl enable --now zivpn-web.service
 
 IP=$(hostname -I | awk '{print $1}')
-echo -e "\n$LINE\n${G}✅ Renew System တပ်ဆင်ပြီးပါပြီ${Z}"
-echo -e "${C}Web Panel :${Z} ${Y}http://$IP:8880${Z}"
+echo -e "\n$LINE\n${G}VPS-IP-COPYလုပ်ပါ${Z}"
+echo -e "${C}ဘာကြည့်နေတာလဲ    :${Z} ${Y}http://$IP:8880${Z}"
+echo -e "${C}ရပါပြီဆို  :${Z} ${Y}/etc/zivpn/users.json${Z}"
+echo -e "${C}မယုံရင် :${Z} ${Y}/etc/zivpn/config.json${Z}"
+echo -e "${C}လော့အင်ကြည့်ကွာ    :${Z} ${Y}systemctl status|restart zivpn  •  systemctl status|restart zivpn-web${Z}"
 echo -e "$LINE"
