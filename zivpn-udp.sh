@@ -1,317 +1,297 @@
 #!/bin/bash
-# ZIVPN UDP Server + Web UI (Myanmar)
-# Features: Calendar for Creation, Expiry Edit, VPN IP display
+# ZIVPN UDP Server + Web UI (Myanmar) - Calendar Version
+# Author mix: Zahid Islam + KSO tweaks
 
 set -euo pipefail
 
-# ===== Colors =====
+# ===== Pretty =====
 B="\e[1;34m"; G="\e[1;32m"; Y="\e[1;33m"; R="\e[1;31m"; C="\e[1;36m"; Z="\e[0m"
 LINE="${B}────────────────────────────────────────────────────────${Z}"
-
 say(){ echo -e "$1"; }
 
-clear
-echo -e "$LINE"
-say "${G}   🌟 ZIVPN UDP-KSO (CALENDAR + IP DISPLAY) 🌟   "
-say "${C}          Developed by KSO & Zahid Islam         "
-echo -e "$LINE"
+echo -e "\n$LINE\n${G}🌟 ZIVPN UDP-KSO (Calendar UI) မှ ရေးသားထားသည်${Z}\n$LINE"
 
 # ===== Root check =====
-if [ "$(id -u)" -ne 0 ]; then
-    say "${R}❌ ဤ script ကို root အဖြစ် run ရပါမယ် (sudo -i)${Z}"
-    exit 1
-fi
+if [ "$(id -u)" -ne 0 ]; then echo -e "${R}ဤ script ကို root အဖြစ် chạy ရပါမယ် (sudo -i)${Z}"; exit 1; fi
 
 export DEBIAN_FRONTEND=noninteractive
 
-# ===== Packages =====
-say "${Y}📦 Packages များ တင်နေပါတယ်။...${Z}"
+# ===== Basic Packages =====
+say "${Y}📦 Packages တင်နေပါတယ်...${Z}"
 apt-get update -y >/dev/null
-apt-get install -y curl ufw jq python3 python3-flask python3-apt iproute2 conntrack ca-certificates openssl >/dev/null
+apt-get install -y curl ufw jq python3 python3-flask iproute2 conntrack ca-certificates openssl >/dev/null
 
-# ===== Folders =====
+# ===== Paths & Files =====
 mkdir -p /etc/zivpn
 BIN="/usr/local/bin/zivpn"
 CFG="/etc/zivpn/config.json"
 USERS="/etc/zivpn/users.json"
 ENVF="/etc/zivpn/web.env"
-WEB_PY="/etc/zivpn/web.py"
 
 # ===== Download Binary =====
-say "${Y}⬇️ Binary ဒေါင်းလုဒ်ဆွဲနေပါတယ်...${Z}"
-URL="https://github.com/zahidbd2/udp-zivpn/releases/latest/download/udp-zivpn-linux-amd64"
-curl -fsSL -o "$BIN" "$URL"
+say "${Y}⬇️ ZIVPN binary ကို ဒေါင်းနေပါတယ်...${Z}"
+curl -fsSL -o "$BIN" "https://github.com/zahidbd2/udp-zivpn/releases/download/udp-zivpn_1.4.9/udp-zivpn-linux-amd64"
 chmod +x "$BIN"
 
 # ===== SSL Certs =====
-openssl req -new -newkey rsa:4096 -days 365 -nodes -x509 \
-    -subj "/C=MM/ST=Yangon/L=Yangon/O=KSO/OU=Net/CN=zivpn" \
+if [ ! -f /etc/zivpn/zivpn.crt ]; then
+    openssl req -new -newkey rsa:4096 -days 365 -nodes -x509 \
+    -subj "/C=MM/ST=Yangon/L=Yangon/O=UPK/CN=zivpn" \
     -keyout "/etc/zivpn/zivpn.key" -out "/etc/zivpn/zivpn.crt" >/dev/null 2>&1
+fi
 
 # ===== Web Login Setup =====
-say "${G}🔑 Web Panel Login သတ်မှတ်ပါ${Z}"
+say "${Y}🔒 Web Admin Login UI သတ်မှတ်ချက်${Z}"
 read -r -p "Admin Username: " WEB_USER
 read -r -s -p "Admin Password: " WEB_PASS; echo
-WEB_SECRET=$(openssl rand -hex 16)
-PUBLIC_IP=$(curl -s ifconfig.me)
+WEB_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
 
-echo "WEB_ADMIN_USER=${WEB_USER}" > "$ENVF"
-echo "WEB_ADMIN_PASSWORD=${WEB_PASS}" >> "$ENVF"
-echo "WEB_SECRET=${WEB_SECRET}" >> "$ENVF"
-echo "VPN_PUBLIC_IP=${PUBLIC_IP}" >> "$ENVF"
+cat > "$ENVF" <<EOF
+WEB_ADMIN_USER=${WEB_USER}
+WEB_ADMIN_PASSWORD=${WEB_PASS}
+WEB_SECRET=${WEB_SECRET}
+EOF
 chmod 600 "$ENVF"
 
-if [ ! -f "$CFG" ]; then
-    echo '{"listen":":5667","auth":{"mode":"passwords","config":["zi"]},"cert":"/etc/zivpn/zivpn.crt","key":"/etc/zivpn/zivpn.key","obfs":"zivpn"}' > "$CFG"
-fi
+# ===== Create Initial Files =====
 [ -f "$USERS" ] || echo "[]" > "$USERS"
+if [ ! -f "$CFG" ]; then
+    echo '{"auth":{"mode":"passwords","config":["zi"]},"listen":":5667","cert":"/etc/zivpn/zivpn.crt","key":"/etc/zivpn/zivpn.key","obfs":"zivpn"}' > "$CFG"
+fi
 
-# ===== Python Web Panel =====
-cat > "$WEB_PY" <<'PY'
-import os, json, subprocess, hmac
-from flask import Flask, render_template_string, request, redirect, session
-from datetime import datetime, timedelta
-
-app = Flask(__name__)
-app.secret_key = os.environ.get("WEB_SECRET", "change-me")
-ADMIN_USER = os.environ.get("WEB_ADMIN_USER", "admin")
-ADMIN_PASS = os.environ.get("WEB_ADMIN_PASSWORD", "admin")
-VPN_IP = os.environ.get("VPN_PUBLIC_IP", "0.0.0.0")
+# ===== Generate Web UI (Python) =====
+cat > /etc/zivpn/web.py <<'PY'
+from flask import Flask, jsonify, render_template_string, request, redirect, url_for, session, make_response
+import json, re, subprocess, os, tempfile, hmac
+from datetime import datetime
 
 USERS_FILE = "/etc/zivpn/users.json"
 CONFIG_FILE = "/etc/zivpn/config.json"
 LOGO_URL = "https://raw.githubusercontent.com/KYAWSOEOO8/kso-script/main/icon.png"
 
-def load_users():
-    try:
-        with open(USERS_FILE, "r") as f: return json.load(f)
-    except: return []
-
-def save_users(users):
-    with open(USERS_FILE, "w") as f: json.dump(users, f, indent=2)
-
-def sync_config():
-    users = load_users()
-    pws = [u["password"] for u in users]
-    try:
-        with open(CONFIG_FILE, "r") as f: cfg = json.load(f)
-        cfg["auth"]["config"] = pws if pws else ["zi"]
-        with open(CONFIG_FILE, "w") as f: json.dump(cfg, f, indent=2)
-        subprocess.run(["systemctl", "restart", "zivpn"], check=False)
-    except: pass
-
-HTML = """
-<!doctype html>
-<html lang="my">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>KSO VIP PANEL</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <style>
-        :root { --p: #2563eb; --bg: #f1f5f9; --card: #ffffff; --bad: #ef4444; }
-        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin:0; padding:15px; }
-        .card { background: var(--card); padding: 20px; border-radius: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); max-width: 450px; margin: auto; }
-        .btn { background: var(--p); color: #fff; border: none; padding: 12px; border-radius: 10px; width: 100%; cursor: pointer; font-weight: bold; }
-        input { width: 100%; padding: 10px; margin: 8px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
-        .user-item { border: 1px solid #eee; padding: 12px; border-radius: 12px; margin-top: 10px; background: #fff; }
-        .user-header { display: flex; justify-content: space-between; align-items: center; }
-        .actions { display: flex; gap: 10px; }
-        .cal-btn { color: var(--p); cursor: pointer; position: relative; font-size: 1.2em; }
-        .cal-btn input { position: absolute; opacity: 0; left:0; top:0; width:100%; height:100%; cursor:pointer; }
-        .ip-box { font-size: 0.8em; background: #e2e8f0; padding: 4px 8px; border-radius: 6px; color: #475569; display: inline-block; margin-top: 5px; cursor: pointer; }
-        #receipt { background: #fff; padding: 30px; text-align: center; border: 3px dashed var(--p); width: 350px; position: fixed; left: -9999px; border-radius: 20px; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        {% if not session.get('auth') %}
-            <h2 align="center">LOGIN</h2>
-            <form method="post" action="/login">
-                <input name="u" placeholder="Username" required>
-                <input name="p" type="password" placeholder="Password" required>
-                <button class="btn">Login</button>
-            </form>
-        {% else %}
-            <div align="center">
-                <img src="{{ logo }}" width="65" style="border-radius:15px; margin-bottom:5px;">
-                <h2 style="margin:0; color:var(--p);">KSO VIP UDP</h2>
-                <small>Server IP: <b>{{ vpn_ip }}</b></small>
-            </div>
-            <hr style="border:0.5px solid #eee; margin:15px 0;">
-            
-            <form method="post" action="/add" id="uForm">
-                <label><small>အသုံးပြုသူအမည်</small></label>
-                <input name="user" id="inUser" placeholder="Username" required>
-                <label><small>စကားဝှက်</small></label>
-                <input name="pass" id="inPass" placeholder="Password" required>
-                <label><small>သက်တမ်းကုန်ဆုံးမည့်ရက်</small></label>
-                <input type="date" name="expiry_date" id="inDate" required>
-                <button type="button" class="btn" onclick="genReceipt()">CREATE & DOWNLOAD</button>
-            </form>
-
-            <h3 style="margin-top:20px;">Users List</h3>
-            {% for u in users %}
-                <div class="user-item">
-                    <div class="user-header">
-                        <div>
-                            <strong>{{ u.user }}</strong><br>
-                            <small style="color:gray;"><i class="fa-regular fa-calendar"></i> {{ u.expires }}</small>
-                        </div>
-                        <div class="actions">
-                            <form method="post" action="/update_expiry" style="margin:0;" class="cal-btn">
-                                <i class="fa-solid fa-calendar-day"></i>
-                                <input type="hidden" name="user" value="{{ u.user }}">
-                                <input type="date" name="new_date" onchange="this.form.submit()">
-                            </form>
-                            <form method="post" action="/delete" style="margin:0;" onsubmit="return confirm('ဖျက်မှာလား?')">
-                                <input type="hidden" name="user" value="{{ u.user }}">
-                                <button type="submit" style="color:var(--bad); border:none; background:none; cursor:pointer; font-size:1.1em;"><i class="fa-solid fa-trash"></i></button>
-                            </form>
-                        </div>
-                    </div>
-                    <div class="ip-box" onclick="copyIP('{{ vpn_ip }}')">
-                        <i class="fa-solid fa-network-wired"></i> IP: {{ vpn_ip }} <small>(Copy)</small>
-                    </div>
-                </div>
-            {% endfor %}
-            <br><p align="center"><a href="/logout" style="color:gray; text-decoration:none; font-size:0.9em;">Logout</a></p>
-        {% endif %}
+HTML = """<!doctype html>
+<html lang="my"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+:root{ --bg:#f0f2f5; --fg:#1e293b; --primary:#2563eb; --ok:#10b981; --warn:#f59e0b; --bad:#ef4444; --card:#ffffff; --bd:#e2e8f0; --muted:#64748b; }
+*{box-sizing: border-box; font-family: 'Segoe UI', sans-serif;}
+body{ background:var(--bg); color:var(--fg); margin:0; padding:15px; display:flex; flex-direction:column; align-items:center; min-height:100vh; }
+header{ width:100%; max-width:400px; text-align:center; margin-bottom:15px; }
+.brand img{ width:70px; height:70px; border-radius:22px; border:3px solid #fff; box-shadow: 0 4px 15px rgba(0,0,0,0.1); margin-bottom:10px; }
+.brand h1{ font-size:1.5em; margin:0; font-weight:900; color:var(--primary); text-transform:uppercase; }
+.login-card{ margin-top:50px; background:#fff; padding:35px; border-radius:30px; width:100%; max-width:360px; text-align:center; box-shadow:0 20px 40px rgba(0,0,0,0.1); }
+form.box{ background:var(--card); border-radius:25px; padding:22px; width:100%; max-width:400px; margin-bottom:20px; box-shadow:0 10px 25px rgba(0,0,0,0.05); }
+.input-grp{ position:relative; margin-bottom: 15px; text-align: left; }
+.input-grp i{ position:absolute; left:12px; top:38px; color:var(--primary); font-size:14px; }
+label{ display:block; font-size:11px; color:var(--muted); margin-bottom:5px; font-weight:800; text-transform:uppercase; }
+input{ width:100%; padding:12px 12px 12px 38px; border:2px solid var(--bd); border-radius:12px; font-size:14px; background:#f8fafc; }
+.btn-primary{ background:var(--primary); color:#fff; border:none; width:100%; padding:15px; border-radius:15px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; }
+.table-container{ width:100%; max-width:400px; }
+table{ width:100%; border-collapse:separate; border-spacing: 0 10px; }
+td{ background:var(--card); padding:15px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); border-radius:18px; position:relative; }
+.status-bar{ position:absolute; left:0; top:0; bottom:0; width:6px; border-radius:18px 0 0 18px; }
+.bar-green{ background: var(--ok); } .bar-red{ background: var(--bad); }
+#receipt{ position: fixed; left: -9999px; width: 350px; background: #fff; padding: 35px; border-radius: 25px; text-align: center; border: 1px solid #eee; }
+.r-title{ color: var(--primary); font-size: 28px; font-weight: 900; border-bottom: 3px dashed var(--bd); padding-bottom: 15px; margin-bottom: 20px; }
+.r-row{ display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 16px; font-weight: 600; }
+</style></head><body>
+{% if not session.get('auth') %}
+    <div class="login-card">
+        <img src="{{ logo }}" style="width:85px; border-radius:22px; margin-bottom:15px;">
+        <h2>LOGIN</h2>
+        <form method="post" action="/login">
+            <div class="input-grp"><label>Username</label><input name="u" required></div>
+            <div class="input-grp"><label>Password</label><input name="p" type="password" required></div>
+            <button class="btn-primary">အကောင့်ဝင်ရန်</button>
+        </form>
     </div>
+{% else %}
+    <header>
+        <div class="brand"><img src="{{ logo }}"><h1>KSO VIP PANEL</h1></div>
+        <div style="margin-bottom:10px;"><a href="/logout" style="color:var(--bad); font-weight:bold; text-decoration:none;">LOGOUT</a></div>
+    </header>
+    <form method="post" action="/add" id="userForm" class="box">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+            <div class="input-grp"><label>နာမည်</label><i class="fa-solid fa-user"></i><input id="inUser" name="user" required></div>
+            <div class="input-grp"><label>စကားဝှက်</label><i class="fa-solid fa-key"></i><input id="inPass" name="password" required></div>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+            <div class="input-grp"><label>သက်တမ်းကုန်ရက်</label><i class="fa-solid fa-calendar"></i><input type="date" id="inExp" name="expires" required></div>
+            <div class="input-grp"><label>PORT</label><i class="fa-solid fa-bolt"></i><input name="port" placeholder="Auto"></div>
+        </div>
+        <button type="button" onclick="handleSave()" class="btn-primary">သိမ်းဆည်းမည် (SAVE)</button>
+    </form>
 
     <div id="receipt">
-        <h1 style="color:var(--p); margin-bottom:5px;">KSO VIP UDP</h1>
-        <hr>
-        <div style="text-align:left; padding:10px 20px;">
-            <p><b>Server IP:</b> {{ vpn_ip }}</p>
-            <p><b>အသုံးပြုသူ:</b> <span id="rUser"></span></p>
-            <p><b>စကားဝှက်:</b> <span id="rPass"></span></p>
-            <p><b>ကုန်ဆုံးရက်:</b> <span id="rDate"></span></p>
-        </div>
-        <hr>
-        <p><b>Premium UDP Service</b></p>
+        <div class="r-title">KSO VIP</div>
+        <div class="r-row"><span>နာမည်:</span> <span id="rUser"></span></div>
+        <div class="r-row"><span>စကားဝှက်:</span> <span id="rPass"></span></div>
+        <div class="r-row"><span>ကုန်ဆုံးရက်:</span> <span id="rDate"></span></div>
+        <div style="margin-top:20px; color:var(--ok); font-weight:800;">ကျေးဇူးတင်ပါသည်</div>
+    </div>
+
+    <div class="table-container">
+        <table><tbody>
+            {% for u in users %}
+            <tr>
+                <td>
+                    <div class="status-bar bar-green"></div>
+                    <strong>{{u.user}}</strong><br>
+                    <small style="color:var(--muted);"><i class="fa-solid fa-clock"></i> {{u.expires}}</small>
+                    <form method="post" action="/delete" style="display:inline; float:right;">
+                        <input type="hidden" name="user" value="{{u.user}}">
+                        <button style="border:none; background:none; color:var(--bad); cursor:pointer;"><i class="fa-solid fa-trash"></i></button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody></table>
     </div>
 
     <script>
-    function copyIP(ip) {
-        navigator.clipboard.writeText(ip);
-        alert("Copied IP: " + ip);
-    }
-    
-    function genReceipt() {
-        const u = document.getElementById('inUser').value;
-        const p = document.getElementById('inPass').value;
-        const d = document.getElementById('inDate').value;
-        if(!u || !p || !d) return alert("အကုန်ဖြည့်ပါ");
-
-        document.getElementById('rUser').innerText = u;
-        document.getElementById('rPass').innerText = p;
-        document.getElementById('rDate').innerText = d;
+    function handleSave() {
+        const user = document.getElementById('inUser').value;
+        const pass = document.getElementById('inPass').value;
+        const exp = document.getElementById('inExp').value;
+        if(!user || !pass || !exp) { alert("အချက်အလက်ပြည့်စုံစွာဖြည့်ပါ"); return; }
+        
+        document.getElementById('rUser').innerText = user;
+        document.getElementById('rPass').innerText = pass;
+        document.getElementById('rDate').innerText = exp;
 
         html2canvas(document.getElementById('receipt'), {scale: 2}).then(canvas => {
-            let link = document.createElement('a');
-            link.download = 'KSO_'+u+'.png';
-            link.href = canvas.toDataURL();
+            const link = document.createElement('a');
+            link.download = 'KSO_VIP_' + user + '.png';
+            link.href = canvas.toDataURL("image/png");
             link.click();
-            document.getElementById('uForm').submit();
+            setTimeout(() => { document.getElementById('userForm').submit(); }, 500);
         });
     }
     </script>
-</body>
-</html>
-"""
+{% endif %}
+</body></html>"""
+
+app = Flask(__name__)
+app.secret_key = os.environ.get("WEB_SECRET","dev-key")
+ADMIN_USER = os.environ.get("WEB_ADMIN_USER","admin")
+ADMIN_PASS = os.environ.get("WEB_ADMIN_PASSWORD","admin")
+
+def load_users():
+    try:
+        with open(USERS_FILE,"r") as f: return json.load(f)
+    except: return []
+
+def save_users(users):
+    with open(USERS_FILE,"w") as f: json.dump(users, f, indent=2)
+    # Sync to config.json
+    try:
+        with open(CONFIG_FILE,"r") as f: cfg = json.load(f)
+        cfg["auth"]["config"] = [u["password"] for u in users]
+        with open(CONFIG_FILE,"w") as f: json.dump(cfg, f, indent=2)
+        subprocess.run(["systemctl", "restart", "zivpn"])
+    except: pass
 
 @app.route("/")
 def index():
-    users = load_users()
-    return render_template_string(HTML, users=users, logo=LOGO_URL, vpn_ip=VPN_IP)
+    return render_template_string(HTML, logo=LOGO_URL, users=load_users())
 
 @app.route("/login", methods=["POST"])
 def login():
-    if request.form['u'] == ADMIN_USER and request.form['p'] == ADMIN_PASS:
-        session['auth'] = True
-    return redirect("/")
+    if request.form.get("u") == ADMIN_USER and request.form.get("p") == ADMIN_PASS:
+        session["auth"] = True
+    return redirect(url_for("index"))
 
 @app.route("/logout")
 def logout():
-    session.pop('auth', None)
-    return redirect("/")
+    session.pop("auth", None)
+    return redirect(url_for("index"))
 
 @app.route("/add", methods=["POST"])
 def add():
-    if not session.get('auth'): return redirect("/")
+    if not session.get("auth"): return redirect(url_for("index"))
+    user = request.form.get("user")
+    pw = request.form.get("password")
+    exp = request.form.get("expires")
     users = load_users()
-    user, pw, expiry = request.form['user'], request.form['pass'], request.form['expiry_date']
-    users.append({"user": user, "password": pw, "expires": expiry})
+    users.append({"user": user, "password": pw, "expires": exp})
     save_users(users)
-    sync_config()
-    return redirect("/")
-
-@app.route("/update_expiry", methods=["POST"])
-def update_expiry():
-    if not session.get('auth'): return redirect("/")
-    users = load_users()
-    user_name, new_date = request.form['user'], request.form['new_date']
-    for u in users:
-        if u['user'] == user_name:
-            u['expires'] = new_date
-            break
-    save_users(users)
-    return redirect("/")
+    return redirect(url_for("index"))
 
 @app.route("/delete", methods=["POST"])
 def delete():
-    if not session.get('auth'): return redirect("/")
-    users = [u for u in load_users() if u['user'] != request.form['user']]
+    if not session.get("auth"): return redirect(url_for("index"))
+    name = request.form.get("user")
+    users = [u for u in load_users() if u["user"] != name]
     save_users(users)
-    sync_config()
-    return redirect("/")
+    return redirect(url_for("index"))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8880)
 PY
 
-# ===== Services Setup =====
-cat >/etc/systemd/system/zivpn.service <<EOF
+# ===== Systemd Services =====
+cat > /etc/systemd/system/zivpn.service <<EOF
 [Unit]
 Description=ZIVPN UDP Server
 After=network.target
+
 [Service]
-WorkingDirectory=/etc/zivpn
 ExecStart=$BIN server -c $CFG
 Restart=always
-RestartSec=3
+User=root
+
 [Install]
 WantedBy=multi-user.target
 EOF
 
-cat >/etc/systemd/system/zivpn-web.service <<EOF
+cat > /etc/systemd/system/zivpn-web.service <<EOF
 [Unit]
 Description=ZIVPN Web Panel
 After=network.target
+
 [Service]
 EnvironmentFile=$ENVF
-ExecStart=/usr/bin/python3 $WEB_PY
+ExecStart=/usr/bin/python3 /etc/zivpn/web.py
 Restart=always
-RestartSec=3
+
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# ===== Network & Firewall =====
+
+# ===== Networking: forwarding + DNAT + MASQ + UFW =====
+echo -e "${Y}😁ရပါပြီနော်..ကိုကို😘😘😘...${Z}"
 sysctl -w net.ipv4.ip_forward=1 >/dev/null
+grep -q '^net.ipv4.ip_forward=1' /etc/sysctl.conf || echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+
 IFACE=$(ip -4 route ls | awk '/default/ {print $5; exit}')
+[ -n "${IFACE:-}" ] || IFACE=eth0
+# DNAT 6000:19999/udp -> :5667
+iptables -t nat -C PREROUTING -i "$IFACE" -p udp --dport 6000:19999 -j DNAT --to-destination :5667 2>/dev/null || \
 iptables -t nat -A PREROUTING -i "$IFACE" -p udp --dport 6000:19999 -j DNAT --to-destination :5667
+# MASQ out
+iptables -t nat -C POSTROUTING -o "$IFACE" -j MASQUERADE 2>/dev/null || \
 iptables -t nat -A POSTROUTING -o "$IFACE" -j MASQUERADE
-ufw allow 5667/udp >/dev/null 2>&1
-ufw allow 6000:19999/udp >/dev/null 2>&1
-ufw allow 8880/tcp >/dev/null 2>&1
 
+ufw allow 5667/udp >/dev/null 2>&1 || true
+ufw allow 6000:19999/udp >/dev/null 2>&1 || true
+ufw allow 8880/tcp >/dev/null 2>&1 || true
+ufw reload >/dev/null 2>&1 || true
+
+# ===== CRLF sanitize =====
+sed -i 's/\r$//' /etc/zivpn/web.py /etc/systemd/system/zivpn.service /etc/systemd/system/zivpn-web.service || true
+
+# ===== Enable services =====
 systemctl daemon-reload
-systemctl enable --now zivpn zivpn-web 2>/dev/null || true
+systemctl enable --now zivpn.service
+systemctl enable --now zivpn-web.service
 
-echo -e "$LINE"
-say "${G}✅ အားလုံးပြီးစီးပါပြီ။ ပြက္ခဒိန် နှင့် IP Display ထည့်သွင်းပြီးပါပြီ။${Z}"
-say "${C}Web Panel:${Z} ${Y}http://$PUBLIC_IP:8880${Z}"
+IP=$(hostname -I | awk '{print $1}')
+echo -e "\n$LINE\n${G}VPS-IP-COPYလုပ်ပါ${Z}"
+echo -e "${C}ဘာကြည့်နေတာလဲ    :${Z} ${Y}http://$IP:8880${Z}"
+echo -e "${C}ရပါပြီဆို  :${Z} ${Y}/etc/zivpn/users.json${Z}"
+echo -e "${C}မယုံရင် :${Z} ${Y}/etc/zivpn/config.json${Z}"
+echo -e "${C}လော့အင်ကြည့်ကွာ    :${Z} ${Y}systemctl status|restart zivpn  •  systemctl status|restart zivpn-web${Z}"
 echo -e "$LINE"
