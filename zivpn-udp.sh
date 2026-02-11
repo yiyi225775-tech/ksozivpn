@@ -171,95 +171,38 @@ td{ background:var(--card); padding:15px; box-shadow: 0 2px 8px rgba(0,0,0,0.03)
     }
     </script>
 {% endif %}
-</body></html>"""
+    users.append({"user":user,"password":password,"expires":expires,"port":port})
+  save_users(users); sync_config_passwords()
+  return jsonify({"ok":True})
 
-app = Flask(__name__)
-app.secret_key = os.environ.get("WEB_SECRET","dev-key")
-ADMIN_USER = os.environ.get("WEB_ADMIN_USER","admin")
-ADMIN_PASS = os.environ.get("WEB_ADMIN_PASSWORD","admin")
+@app.route("/favicon.ico", methods=["GET"])
+def favicon(): return ("",204)
 
-def load_users():
-    try:
-        with open(USERS_FILE,"r") as f: return json.load(f)
-    except: return []
-
-def save_users(users):
-    with open(USERS_FILE,"w") as f: json.dump(users, f, indent=2)
-    # Sync to config.json
-    try:
-        with open(CONFIG_FILE,"r") as f: cfg = json.load(f)
-        cfg["auth"]["config"] = [u["password"] for u in users]
-        with open(CONFIG_FILE,"w") as f: json.dump(cfg, f, indent=2)
-        subprocess.run(["systemctl", "restart", "zivpn"])
-    except: pass
-
-@app.route("/")
-def index():
-    return render_template_string(HTML, logo=LOGO_URL, users=load_users())
-
-@app.route("/login", methods=["POST"])
-def login():
-    if request.form.get("u") == ADMIN_USER and request.form.get("p") == ADMIN_PASS:
-        session["auth"] = True
-    return redirect(url_for("index"))
-
-@app.route("/logout")
-def logout():
-    session.pop("auth", None)
-    return redirect(url_for("index"))
-
-@app.route("/add", methods=["POST"])
-def add():
-    if not session.get("auth"): return redirect(url_for("index"))
-    user = request.form.get("user")
-    pw = request.form.get("password")
-    exp = request.form.get("expires")
-    users = load_users()
-    users.append({"user": user, "password": pw, "expires": exp})
-    save_users(users)
-    return redirect(url_for("index"))
-
-@app.route("/delete", methods=["POST"])
-def delete():
-    if not session.get("auth"): return redirect(url_for("index"))
-    name = request.form.get("user")
-    users = [u for u in load_users() if u["user"] != name]
-    save_users(users)
-    return redirect(url_for("index"))
+@app.errorhandler(405)
+def handle_405(e): return redirect(url_for('index'))
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8880)
+  app.run(host="0.0.0.0", port=8880)
 PY
 
-# ===== Systemd Services =====
-cat > /etc/systemd/system/zivpn.service <<EOF
-[Unit]
-Description=ZIVPN UDP Server
-After=network.target
-
-[Service]
-ExecStart=$BIN server -c $CFG
-Restart=always
-User=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-cat > /etc/systemd/system/zivpn-web.service <<EOF
+# ===== Web systemd =====
+cat >/etc/systemd/system/zivpn-web.service <<'EOF'
 [Unit]
 Description=ZIVPN Web Panel
 After=network.target
 
 [Service]
-EnvironmentFile=$ENVF
+Type=simple
+User=root
+# Load optional web login credentials
+EnvironmentFile=-/etc/zivpn/web.env
 ExecStart=/usr/bin/python3 /etc/zivpn/web.py
 Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
 
 # ===== Networking: forwarding + DNAT + MASQ + UFW =====
 echo -e "${Y}😁ရပါပြီနော်..ကိုကို😘😘😘...${Z}"
