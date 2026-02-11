@@ -1,78 +1,109 @@
 #!/bin/bash
-# ZIVPN UDP Server + Web UI (KSO Final Verified - Fixed Sync)
+# ZIVPN UDP Server + Web UI (Myanmar) - Advanced Copy Mode
+# Features: Individual Copy, Status Colors, Edit/Renew
+
 set -euo pipefail
 
-# ===== Styles =====
-B="\e[1;34m"; G="\e[1;32m"; Y="\e[1;33m"; R="\e[1;31m"; C="\e[1;36m"; Z="\e[0m"
+# ===== Pretty Colors =====
+B="\e[1;34m"; G="\e[1;32m"; Y="\e[1;33m"; R="\e[1;31m"; C="\e[1;36m"; M="\e[1;35m"; Z="\e[0m"
 LINE="${B}────────────────────────────────────────────────────────${Z}"
 
-clear
-echo -e "$LINE"
-echo -e "${G}🌟 ZIVPN KSO FINAL VERIFIED SCRIPT (ZIVPN FIXED)${Z}"
-echo -e "$LINE"
+say(){ echo -e "$1"; }
 
-# 1. Root Check
-if [ "$(id -u)" -ne 0 ]; then echo -e "${R}Root user ဖြင့် run ပါ။${Z}"; exit 1; fi
+echo -e "\n$LINE\n${G}🌟 ZIVPN UDP-KSO (Full Copy Control) မှ ကြိုဆိုပါတယ်${Z}\n$LINE"
 
-# Get Custom Login from User
-read -p "Admin Username ပေးပါ: " ADMIN_U
-read -p "Admin Password ပေးပါ: " ADMIN_P
-if [[ -z "$ADMIN_U" || -z "$ADMIN_P" ]]; then echo -e "${R}Username/Password လိုအပ်ပါသည်။${Z}"; exit 1; fi
+# ===== Root check =====
+if [ "$(id -u)" -ne 0 ]; then
+    echo -e "${R}ဤ script ကို root အဖြစ် run ရပါမယ် (sudo -i)${Z}"; exit 1
+fi
 
-# 2. Environments & Files
-mkdir -p /etc/zivpn
-echo "WEB_ADMIN_USER=$ADMIN_U" > /etc/zivpn/web.env
-echo "WEB_ADMIN_PASSWORD=$ADMIN_P" >> /etc/zivpn/web.env
-echo "WEB_SECRET=$(openssl rand -hex 16)" >> /etc/zivpn/web.env
+export DEBIAN_FRONTEND=noninteractive
 
-# Install Necessary Tools
+# ===== Packages Installation =====
+say "${Y}📦 လိုအပ်သော Packages များ ထည့်သွင်းနေသည်...${Z}"
 apt-get update -y >/dev/null
-apt-get install -y python3 python3-flask jq ufw iproute2 openssl >/dev/null
+apt-get install -y curl ufw jq python3 python3-flask python3-apt iproute2 conntrack ca-certificates openssl >/dev/null
 
-# 3. Python Web UI Script
-cat > /etc/zivpn/web.py <<'PY'
-import os, json, subprocess
-from flask import Flask, render_template_string, request, redirect, session
-from datetime import datetime
+# ===== Paths & Setup =====
+BIN="/usr/local/bin/zivpn"
+CFG="/etc/zivpn/config.json"
+USERS="/etc/zivpn/users.json"
+ENVF="/etc/zivpn/web.env"
+mkdir -p /etc/zivpn
+
+# Binary Download
+curl -fsSL -o "$BIN" "https://github.com/zahidbd2/udp-zivpn/releases/download/udp-zivpn_1.4.9/udp-zivpn-linux-amd64" || \
+curl -fSL -o "$BIN" "https://github.com/zahidbd2/udp-zivpn/releases/latest/download/udp-zivpn-linux-amd64"
+chmod +x "$BIN"
+
+# SSL Certs
+if [ ! -f /etc/zivpn/zivpn.crt ]; then
+    openssl req -new -newkey rsa:4096 -days 365 -nodes -x509 \
+    -subj "/C=MM/ST=Yangon/L=Yangon/O=UPK/OU=Net/CN=zivpn" \
+    -keyout "/etc/zivpn/zivpn.key" -out "/etc/zivpn/zivpn.crt" >/dev/null 2>&1
+fi
+
+# Admin Login (Default admin/admin123)
+say "${Y}🔒 Web Admin အတွက် Username/Password သတ်မှတ်ပါ${Z}"
+read -r -p "Admin Username (Default: admin): " WEB_USER
+WEB_USER=${WEB_USER:-admin}
+read -r -s -p "Admin Password (Default: admin123): " WEB_PASS; echo
+WEB_PASS=${WEB_PASS:-admin123}
+WEB_SECRET=$(openssl rand -hex 16)
+
+echo "WEB_ADMIN_USER=${WEB_USER}" > "$ENVF"
+echo "WEB_ADMIN_PASSWORD=${WEB_PASS}" >> "$ENVF"
+echo "WEB_SECRET=${WEB_SECRET}" >> "$ENVF"
+chmod 600 "$ENVF"
+
+# Initial Config
+[ -f "$USERS" ] || echo "[]" > "$USERS"
+if [ ! -f "$CFG" ]; then
+    echo '{"auth":{"mode":"passwords","config":["zi"]},"listen":":5667","cert":"/etc/zivpn/zivpn.crt","key":"/etc/zivpn/zivpn.key","obfs":"zivpn"}' > "$CFG"
+fi
+
+# ===== Web Python Script (Individual Copy Functions) =====
+cat > /etc/zivpn/web.py << 'PY'
+import os, json, subprocess, hmac, re
+from flask import Flask, render_template_string, request, redirect, url_for, session, jsonify
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("WEB_SECRET")
-ADMIN_USER = os.environ.get("WEB_ADMIN_USER")
-ADMIN_PASS = os.environ.get("WEB_ADMIN_PASSWORD")
-
+app.secret_key = os.environ.get("WEB_SECRET", "dev-secret")
 USERS_FILE = "/etc/zivpn/users.json"
 CONFIG_FILE = "/etc/zivpn/config.json"
 
-def get_ip():
+def get_vps_ip():
     try: return subprocess.check_output(["hostname", "-I"]).decode().split()[0]
     except: return "127.0.0.1"
 
-def load_data():
+VPS_IP = get_vps_ip()
+
+def load_users():
     if not os.path.exists(USERS_FILE): return []
     try:
-        with open(USERS_FILE, "r") as f: return json.load(f)
+        with open(USERS_FILE, "r") as f:
+            data = json.load(f)
+            for u in data:
+                try:
+                    exp_date = datetime.strptime(u['expires'], "%Y-%m-%d")
+                    u['days_left'] = (exp_date - datetime.now()).days
+                except: u['days_left'] = 0
+            return data
     except: return []
 
-def save_and_sync(users):
-    # Save to users.json
-    with open(USERS_FILE, "w") as f: json.dump(users, f, indent=2)
-    
-    # Sync with ZIVPN config.json
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, "r") as f: 
-                cfg = json.load(f)
-            
-            # auth config ထဲကို password string list ပဲ ထည့်ပေးရမှာပါ
-            cfg["auth"]["config"] = [str(u["password"]) for u in users]
-            
-            with open(CONFIG_FILE, "w") as f: 
-                json.dump(cfg, f, indent=2)
-            
-            # Restart ZIVPN to apply changes
-            subprocess.run(["systemctl", "restart", "zivpn"])
-        except Exception as e:
-            print(f"Sync Error: {e}")
+def save_users(data):
+    with open(USERS_FILE, "w") as f: json.dump(data, f, indent=2)
+
+def sync_vpn():
+    users = load_users()
+    pws = sorted(list(set([u["password"] for u in users])))
+    try:
+        with open(CONFIG_FILE, "r") as f: cfg = json.load(f)
+        cfg["auth"]["config"] = pws if pws else ["zi"]
+        with open(CONFIG_FILE, "w") as f: json.dump(cfg, f, indent=2)
+        subprocess.run(["systemctl", "restart", "zivpn.service"])
+    except: pass
 
 HTML = """
 <!DOCTYPE html>
@@ -80,80 +111,131 @@ HTML = """
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>KSO ZIVPN CONTROL</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        body { font-family: sans-serif; background: #f4f6f9; padding: 15px; margin: 0; }
-        .container { max-width: 450px; margin: auto; }
-        .header { background: #2563eb; color: white; padding: 20px; border-radius: 15px; text-align: center; margin-bottom: 20px; }
-        .card { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        label { display: block; font-size: 12px; font-weight: bold; color: #666; margin-bottom: 5px; }
-        input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 15px; box-sizing: border-box; }
-        .btn-save { width: 100%; padding: 12px; background: #2563eb; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
-        .user-card { background: white; border-radius: 12px; padding: 15px; margin-bottom: 10px; border-left: 5px solid #2563eb; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-        .row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
-        .copy { color: #2563eb; cursor: pointer; font-size: 12px; border: 1px solid #2563eb; padding: 2px 5px; border-radius: 4px; }
-        .actions { display: flex; gap: 10px; margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px; }
-        .btn-edit { flex: 1; background: #10b981; color: white; border: none; padding: 8px; border-radius: 6px; cursor: pointer; }
-        .btn-del { flex: 1; background: #ef4444; color: white; border: none; padding: 8px; border-radius: 6px; cursor: pointer; }
-        .badge { background: #e0e7ff; color: #4338ca; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+        :root { --p:#2563eb; --bg:#f1f5f9; --card:#ffffff; --ok:#10b981; --warn:#f59e0b; --bad:#ef4444; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin:0; padding:15px; color:#334155; }
+        .container { width:100%; max-width:650px; margin:auto; }
+        .card { background:var(--card); padding:20px; border-radius:12px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom:15px; }
+        .btn { padding:10px; border:none; border-radius:8px; cursor:pointer; font-weight:bold; width:100%; margin-top:5px; }
+        .btn-p { background:var(--p); color:white; }
+        .status-pill { padding:3px 8px; border-radius:12px; font-size:10px; font-weight:bold; color:white; }
+        .bg-ok { background:var(--ok); } .bg-warn { background:var(--warn); } .bg-bad { background:var(--bad); }
+        table { width:100%; border-collapse:collapse; margin-top:10px; }
+        th { text-align:left; font-size:11px; color:#64748b; padding:8px; border-bottom:2px solid #f1f5f9; }
+        td { padding:10px 8px; border-bottom:1px solid #f1f5f9; font-size:13px; }
+        .copy-btn { color:var(--p); cursor:pointer; margin-left:5px; font-size:12px; }
+        .copy-btn:hover { color:#1d4ed8; }
+        .action-row { display:flex; gap:10px; }
+        .input-group { margin-bottom:10px; }
+        input { width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box; }
+        .toast { position:fixed; bottom:20px; right:20px; background:#1e293b; color:white; padding:10px 20px; border-radius:8px; display:none; z-index:99; }
     </style>
 </head>
 <body>
+    <div id="toast" class="toast">Copied!</div>
     <div class="container">
-        {% if not session.get('auth') %}
-        <div class="card">
-            <h2 style="text-align:center">Login</h2>
-            <form method="post" action="/login">
-                <input type="text" name="u" placeholder="Username" required>
-                <input type="password" name="p" placeholder="Password" required>
-                <button class="btn-save">Login</button>
-            </form>
-        </div>
-        {% else %}
-        <div class="header">
-            <h2 style="margin:0">KSO VIP PANEL</h2>
-            <p style="margin:5px 0 0; opacity:0.8">Total Users: {{ count }}</p>
-        </div>
-
-        <div class="card">
-            <form method="post" action="/add">
-                <div style="display:flex; gap:10px">
-                    <div style="flex:1"><label>Username</label><input type="text" name="user" id="fUser" required></div>
-                    <div style="flex:1"><label>Password</label><input type="text" name="pass" id="fPass" required></div>
-                </div>
-                <div style="display:flex; gap:10px">
-                    <div style="flex:1"><label>UDP Port</label><input type="number" name="port" id="fPort" value="5667" required></div>
-                    <div style="flex:1"><label>Expire Date</label><input type="date" name="exp" id="fExp" required></div>
-                </div>
-                <button class="btn-save">သိမ်းဆည်းမည် / သက်တမ်းတိုးမည်</button>
-            </form>
-        </div>
-
-        {% for u in users %}
-        <div class="user-card">
-            <div class="row"><span style="font-weight:bold">{{ u.user }}</span> <span class="badge">{{ u.days }} Days Left</span></div>
-            <div class="row"><span>IP: {{ ip }}</span> <span class="copy" onclick="cp('{{ip}}')">Copy</span></div>
-            <div class="row"><span>Pass: {{ u.password }}</span> <span class="copy" onclick="cp('{{u.password}}')">Copy</span></div>
-            <div class="row"><span>Port: {{ u.port }}</span> <span class="copy" onclick="cp('{{u.port}}')">Copy</span></div>
-            
-            <div class="actions">
-                <button class="btn-edit" onclick="ed('{{u.user}}','{{u.password}}','{{u.port}}','{{u.expires}}')">သက်တမ်းတိုး</button>
-                <form method="post" action="/del" style="flex:1"><input type="hidden" name="user" value="{{u.user}}"><button class="btn-del" onclick="return confirm('ဖျက်မှာလား?')">ဖျက်မည်</button></form>
+        {% if not authed %}
+            <div class="card" style="max-width:350px; margin:100px auto; text-align:center;">
+                <h2>ADMIN LOGIN</h2>
+                <form method="post" action="/login">
+                    <input name="u" placeholder="Username" required style="margin-bottom:10px;">
+                    <input name="p" type="password" placeholder="Password" required>
+                    <button class="btn btn-p">LOGIN</button>
+                </form>
             </div>
-        </div>
-        {% endfor %}
-        <center><a href="/logout" style="color:red; text-decoration:none; font-size:13px">Logout</a></center>
+        {% else %}
+            <div style="text-align:center; margin-bottom:15px;">
+                <h2 style="margin:0; color:var(--p);">KSO VIP PANEL</h2>
+                <span style="font-size:12px;">Server IP: <b>{{vps_ip}}</b> <i class="fa-regular fa-copy copy-btn" onclick="copy('{{vps_ip}}')"></i></span>
+            </div>
+
+            <div class="card">
+                <form method="post" action="/add">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                        <div class="input-group"><label style="font-size:11px; font-weight:bold;">အသုံးပြုသူအမည်</label><input name="user" id="inUser" required></div>
+                        <div class="input-group"><label style="font-size:11px; font-weight:bold;">စကားဝှက်</label><input name="password" id="inPass" required></div>
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                        <div class="input-group"><label style="font-size:11px; font-weight:bold;">ရက်ပေါင်း</label><input name="days" id="inDays" placeholder="30"></div>
+                        <div class="input-group"><label style="font-size:11px; font-weight:bold;">PORT</label><input name="port" placeholder="Auto"></div>
+                    </div>
+                    <button class="btn btn-p">SAVE ACCOUNT</button>
+                </form>
+            </div>
+
+            <div class="card" style="overflow-x:auto;">
+                <table id="userTable">
+                    <thead>
+                        <tr>
+                            <th>User/IP</th>
+                            <th>Password</th>
+                            <th>Expires</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for u in users %}
+                        <tr>
+                            <td>
+                                <b>{{u.user}}</b> <i class="fa-regular fa-copy copy-btn" onclick="copy('{{u.user}}')"></i><br>
+                                <small>{{vps_ip}}</small>
+                            </td>
+                            <td>
+                                <code>{{u.password}}</code> <i class="fa-regular fa-copy copy-btn" onclick="copy('{{u.password}}')"></i>
+                            </td>
+                            <td>
+                                {% if u.days_left > 10 %}
+                                    <span class="status-pill bg-ok">{{u.days_left}} d</span>
+                                {% elif u.days_left > 3 %}
+                                    <span class="status-pill bg-warn">{{u.days_left}} d</span>
+                                {% else %}
+                                    <span class="status-pill bg-bad">{{u.days_left}} d</span>
+                                {% endif %}
+                                <br><small>{{u.expires}}</small> <i class="fa-regular fa-copy copy-btn" onclick="copy('{{u.expires}}')"></i>
+                            </td>
+                            <td>
+                                <div class="action-row">
+                                    <i class="fa-solid fa-pen-to-square" style="color:var(--p); cursor:pointer;" onclick="edit('{{u.user}}', '{{u.password}}')"></i>
+                                    <i class="fa-solid fa-share-nodes" style="color:#64748b; cursor:pointer;" onclick="copyFull('{{vps_ip}}', '{{u.user}}', '{{u.password}}', '{{u.expires}}')"></i>
+                                    <form method="post" action="/delete" style="display:inline;" onsubmit="return confirm('ဖျက်မှာလား?')">
+                                        <input type="hidden" name="user" value="{{u.user}}">
+                                        <button style="border:none; background:none; padding:0; cursor:pointer;"><i class="fa-solid fa-trash-can" style="color:var(--bad);"></i></button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div style="text-align:center;"><a href="/logout" style="color:var(--bad); font-size:12px; text-decoration:none;">Logout Panel</a></div>
         {% endif %}
     </div>
+
     <script>
-        function cp(t){ navigator.clipboard.writeText(t); alert("Copied!"); }
-        function ed(u,p,pt,e){
-            document.getElementById('fUser').value=u;
-            document.getElementById('fPass').value=p;
-            document.getElementById('fPort').value=pt;
-            document.getElementById('fExp').value=e;
-            window.scrollTo({top:0, behavior:'smooth'});
+        function copy(txt) {
+            navigator.clipboard.writeText(txt);
+            showToast("Copied: " + txt);
+        }
+
+        function copyFull(ip, u, p, exp) {
+            const full = `🌐 KSO VIP ACCOUNT\\n───────────────\\nIP: ${ip}\\nUser: ${u}\\nPass: ${p}\\nExpire: ${exp}\\n───────────────`;
+            navigator.clipboard.writeText(full);
+            showToast("Full Account Info Copied!");
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerText = msg;
+            t.style.display = 'block';
+            setTimeout(() => { t.style.display = 'none'; }, 2000);
+        }
+
+        function edit(u, p) {
+            document.getElementById('inUser').value = u;
+            document.getElementById('inPass').value = p;
+            window.scrollTo({top: 0, behavior: 'smooth'});
         }
     </script>
 </body>
@@ -162,77 +244,79 @@ HTML = """
 
 @app.route("/")
 def index():
-    users = load_data()
-    now = datetime.now()
-    for u in users:
-        try:
-            diff = (datetime.strptime(u['expires'], "%Y-%m-%d") - now).days + 1
-            u['days'] = diff if diff > 0 else 0
-        except: u['days'] = 0
-    return render_template_string(HTML, users=users, count=len(users), ip=get_ip())
+    if not session.get("authed"): return render_template_string(HTML, authed=False)
+    return render_template_string(HTML, authed=True, users=load_users(), vps_ip=VPS_IP)
 
 @app.route("/login", methods=["POST"])
 def login():
-    if request.form.get("u") == ADMIN_USER and request.form.get("p") == ADMIN_PASS:
-        session['auth'] = True
-    return redirect("/")
+    if request.form.get("u") == os.environ.get("WEB_ADMIN_USER") and \
+       request.form.get("p") == os.environ.get("WEB_ADMIN_PASSWORD"):
+        session["authed"] = True
+    return redirect(url_for("index"))
 
 @app.route("/logout")
-def logout(): session.clear(); return redirect("/")
+def logout():
+    session.clear(); return redirect(url_for("index"))
 
 @app.route("/add", methods=["POST"])
-def add():
-    if not session.get('auth'): return redirect("/")
-    users = [u for u in load_data() if u['user'] != request.form.get("user")]
-    users.append({
-        "user": request.form.get("user"), 
-        "password": request.form.get("pass"), 
-        "port": request.form.get("port"), 
-        "expires": request.form.get("exp")
-    })
-    save_and_sync(users)
-    return redirect("/")
+def add_user():
+    if not session.get("authed"): return redirect(url_for("index"))
+    user, password = request.form.get("user").strip(), request.form.get("password").strip()
+    days = int(request.form.get("days") or 30)
+    expires = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+    users = [u for u in load_users() if u["user"] != user]
+    users.append({"user": user, "password": password, "expires": expires})
+    save_users(users); sync_vpn()
+    return redirect(url_for("index"))
 
-@app.route("/del", methods=["POST"])
-def delete():
-    if not session.get('auth'): return redirect("/")
-    users = [u for u in load_data() if u['user'] != request.form.get("user")]
-    save_and_sync(users)
-    return redirect("/")
+@app.route("/delete", methods=["POST"])
+def delete_user():
+    if not session.get("authed"): return redirect(url_for("index"))
+    user = request.form.get("user")
+    users = [u for u in load_users() if u["user"] != user]
+    save_users(users); sync_vpn()
+    return redirect(url_for("index"))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8880)
 PY
 
-# 4. Networking (ZIVPN Default Port)
-sysctl -w net.ipv4.ip_forward=1 >/dev/null
-IFACE=$(ip -4 route ls | awk '/default/ {print $5; exit}')
-# Clean old rules
-iptables -t nat -F PREROUTING || true
-# Forwarding for UDP (Default Zivpn 5667)
-iptables -t nat -A PREROUTING -i "$IFACE" -p udp --dport 5667 -j DNAT --to-destination :5667
-iptables -t nat -A POSTROUTING -o "$IFACE" -j MASQUERADE
-ufw allow 8880/tcp >/dev/null
-ufw allow 5667/udp >/dev/null
-
-# 5. Service Auto Start
-cat > /etc/systemd/system/zivpn-web.service <<EOF
+# ===== Systemd & Networking (Unchanged) =====
+cat >/etc/systemd/system/zivpn.service <<EOF
 [Unit]
-Description=ZIVPN Web Management
+Description=ZIVPN UDP Server
 After=network.target
 [Service]
-EnvironmentFile=/etc/zivpn/web.env
+ExecStart=$BIN server -c $CFG
+Restart=always
+User=root
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat >/etc/systemd/system/zivpn-web.service <<EOF
+[Unit]
+Description=ZIVPN Web Panel
+After=network.target
+[Service]
+EnvironmentFile=$ENVF
 ExecStart=/usr/bin/python3 /etc/zivpn/web.py
 Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable --now zivpn-web.service
-systemctl restart zivpn-web.service
+sysctl -w net.ipv4.ip_forward=1
+IFACE=$(ip -4 route ls | awk '/default/ {print $5; exit}')
+iptables -t nat -A PREROUTING -i "$IFACE" -p udp --dport 6000:19999 -j DNAT --to-destination :5667
+iptables -t nat -A POSTROUTING -o "$IFACE" -j MASQUERADE
+ufw allow 5667/udp && ufw allow 6000:19999/udp && ufw allow 8880/tcp
 
-echo -e "$LINE"
-echo -e "${G}✅ ZIVPN Fixed & UI Restored!${Z}"
-echo -e "${C}URL:${Z} http://$(hostname -I | awk '{print $1}'):8880"
-echo -e "$LINE"
+systemctl daemon-reload
+systemctl enable --now zivpn zivpn-web
+
+IP=$(hostname -I | awk '{print $1}')
+echo -e "\n$LINE"
+say "${G}✅ အကုန်လုံး အိုကေပါပြီ${Z}"
+say "${C}Web Panel :${Z} ${Y}http://$IP:8880${Z}"
+echo -e "$LINE\n"
